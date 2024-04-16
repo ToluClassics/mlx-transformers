@@ -4,11 +4,11 @@ description = """
 
 """
 
-with open('requirements.txt') as f:
+with open("requirements.txt") as f:
     requirements = f.read().splitlines()
 
 packages = setuptools.find_packages()
-packages.remove('tests')
+packages.remove("tests")
 
 setuptools.setup(
     name="mlx-modelzoo",
@@ -21,5 +21,5 @@ setuptools.setup(
     url="https://github.com/ToluClassics/mlx-model-zoo",
     install_requires=requirements,
     include_package_data=True,
-    python_requires='>=3.10',
+    python_requires=">=3.10",
 )
