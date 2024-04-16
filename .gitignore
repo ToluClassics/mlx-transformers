@@ -1,0 +1,19 @@
+*~
+.DS_Store
+.idea
+__pycache__
+*.pyc
+collections/*
+indexes/*
+.vscode/
+venv/
+
+# build directories from `python3 setup.py sdist bdist_wheel`
+build/
+dist/
+
+# runs should be ignored
+runs/
+
+# logs should also be ignored
+logs/
