@@ -33,6 +33,11 @@ def load_model(model_name: str) -> MlxBertModel:
     return model
 
 
+def load_hgf_model(model_name: str) -> BertModel:
+    model = BertModel.from_pretrained(model_name)
+    return model
+
+
 class TestMlxBert(unittest.TestCase):
 
     @classmethod
@@ -51,6 +56,9 @@ class TestMlxBert(unittest.TestCase):
         outputs = self.model(**inputs)
 
         self.assertIsInstance(outputs.last_hidden_state, mx.array)
+
+    def test_model_output_hgf(self):
+        pass
 
 
 if __name__ == "__main__":
