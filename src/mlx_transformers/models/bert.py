@@ -7,6 +7,7 @@ import mlx.nn as nn
 from transformers import BertConfig
 
 from .modelling_outputs import *
+from .utils import get_extended_attention_mask
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,10 @@ class BertSelfAttention(nn.Module):
         attention_scores = query_layer @ key_layer.transpose(0, 1, 3, 2)
 
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+
+        if attention_mask is not None:
+            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+            attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
         attention_probs = mx.softmax(attention_scores, axis=-1)
@@ -388,6 +393,10 @@ class BertModel(nn.Module):
             else:
                 token_type_ids = mx.zeros(input_shape)
 
+        extended_attention_mask: mx.array = get_extended_attention_mask(
+            attention_mask, input_shape
+        )
+
         embedding_output = self.embeddings(
             input_ids=input_ids,
             position_ids=position_ids,
@@ -395,7 +404,7 @@ class BertModel(nn.Module):
         )
         encoder_outputs = self.encoder(
             embedding_output,
-            attention_mask=attention_mask,
+            attention_mask=extended_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
