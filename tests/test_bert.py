@@ -6,7 +6,7 @@ import mlx.core as mx
 import numpy
 from transformers import BertConfig, BertModel, BertTokenizer
 
-from mlx_transformers.models.bert import BertModel as MlxBertModel
+from src.mlx_transformers.models.bert import BertModel as MlxBertModel
 
 
 def convert(model_name: str, mlx_model: str) -> None:
