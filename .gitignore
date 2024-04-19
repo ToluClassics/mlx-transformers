@@ -17,3 +17,5 @@ runs/
 
 # logs should also be ignored
 logs/
+
+mlx_transformers.egg-info/

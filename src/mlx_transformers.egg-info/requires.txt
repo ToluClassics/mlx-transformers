@@ -1,9 +1,0 @@
-huggingface-hub==0.22.2
-mlx==0.8.1
-numpy==1.26.4
-safetensors==0.4.3
-sentencepiece==0.2.0
-tokenizers==0.19.1
-torch==2.2.2
-tqdm==4.66.2
-transformers==4.40.0
