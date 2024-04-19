@@ -4,19 +4,19 @@ import unittest
 
 import mlx.core as mx
 import numpy as np
-from transformers import BertConfig, BertModel, BertTokenizer
+from transformers import RobertaConfig, RobertaModel, RobertaTokenizer
 
-from src.mlx_transformers.models import BertModel as MlxBertModel
+from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
 
 
 def convert(model_name: str, mlx_model: str) -> None:
-    model = BertModel.from_pretrained(model_name)
+    model = RobertaModel.from_pretrained(model_name)
     # save the tensors
     tensors = {key: tensor.numpy() for key, tensor in model.state_dict().items()}
     np.savez(mlx_model, **tensors)
 
 
-def load_model(model_name: str) -> MlxBertModel:
+def load_model(model_name: str) -> MlxRobertaModel:
     current_directory = os.path.dirname(os.path.realpath(__file__))
     weights_path = os.path.join(
         current_directory, "model_checkpoints", model_name.replace("/", "-") + ".npz"
@@ -25,16 +25,16 @@ def load_model(model_name: str) -> MlxBertModel:
     if not os.path.exists(weights_path):
         convert(model_name, weights_path)
 
-    config = BertConfig.from_pretrained(model_name)
-    model = MlxBertModel(config)
+    config = RobertaConfig.from_pretrained(model_name)
+    model = MlxRobertaModel(config)
 
     model.load_weights(weights_path, strict=True)
 
     return model
 
 
-def load_hgf_model(model_name: str) -> BertModel:
-    model = BertModel.from_pretrained(model_name)
+def load_hgf_model(model_name: str) -> RobertaModel:
+    model = RobertaModel.from_pretrained(model_name)
     return model
 
 
@@ -42,9 +42,9 @@ class TestMlxRoberta(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.model_name = "bert-base-uncased"
+        cls.model_name = "FacebookAI/roberta-base"
         cls.model = load_model(cls.model_name)
-        cls.tokenizer = BertTokenizer.from_pretrained(cls.model_name)
+        cls.tokenizer = RobertaTokenizer.from_pretrained(cls.model_name)
         cls.input_text = "Hello, my dog is cute"
 
     def test_forward(self) -> None:

@@ -20,7 +20,9 @@ MLX transformers is currently only available for infernce on Apple Silicon devic
 The following models have been ported to MLX Transformers from Huggingface for inference:
 
 1. Bert
-2. M2M100
+2. Roberta
+3. XLMRoberta
+4. M2M100
 
 ## Examples
 ...

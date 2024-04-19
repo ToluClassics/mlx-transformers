@@ -1,4 +1,4 @@
-"""PyTorch BERT model."""
+"""PyTorch RoBERTa model."""
 
 import logging
 import math
@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Union
 
 import mlx.core as mx
 import mlx.nn as nn
-from transformers import BertConfig
+from transformers import XLMRobertaConfig
 
 from .modelling_outputs import *
 from .utils import ACT2FN, get_extended_attention_mask
@@ -14,8 +14,24 @@ from .utils import ACT2FN, get_extended_attention_mask
 logger = logging.getLogger(__name__)
 
 
-class BertEmbeddings(nn.Module):
-    def __init__(self, config: BertConfig):
+def create_position_ids_from_input_ids(
+    input_ids, padding_idx, past_key_values_length=0
+):
+    """
+    Replace non-padding symbols with their position numbers.
+    Position numbers begin at padding_idx+1. Padding symbols
+    are ignored. This is modified from fairseq's `utils.make_positions`.
+    """
+    mask = (input_ids != padding_idx).astype(mx.int16)
+
+    incremental_indices = (
+        mx.cumsum(mask, axis=1).astype(input_ids.dtype) + past_key_values_length
+    ) * mask
+    return incremental_indices + padding_idx
+
+
+class XLMRobertaEmbeddings(nn.Module):
+    def __init__(self, config: XLMRobertaConfig):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(
@@ -25,35 +41,64 @@ class BertEmbeddings(nn.Module):
             config.max_position_embeddings, config.hidden_size
         )
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.padding_idx = config.pad_token_id
 
     def __call__(
         self,
         input_ids: mx.array,
         position_ids: mx.array,
         token_type_ids: mx.array = None,
+        inputs_embeds: mx.array = None,
     ) -> mx.array:
-        words = self.word_embeddings(input_ids)
 
-        position_ids = (
-            mx.arange(input_ids.shape[1]) if position_ids is None else position_ids
-        )
+        if position_ids is None:
+            if input_ids is not None:
+                position_ids = create_position_ids_from_input_ids(
+                    input_ids, self.padding_idx
+                )
+            else:
+                position_ids = self.create_position_ids_from_inputs_embeds(
+                    inputs_embeds
+                )
 
-        position = self.position_embeddings(
-            mx.broadcast_to(position_ids, input_ids.shape)
-        )
+        if input_ids is not None:
+            input_shape = input_ids.shape
+        else:
+            input_shape = inputs_embeds.shape[:-1]
+
+        seq_length = input_shape[1]
 
         if token_type_ids is None:
-            # If token_type_ids is not provided, default to zeros
-            token_type_ids = mx.zeros_like(input_ids)
+            token_type_ids = mx.zeros(input_shape, dtype="int32")
 
-        token_types = self.token_type_embeddings(token_type_ids)
+        if inputs_embeds is None:
+            inputs_embeds = self.word_embeddings(input_ids)
 
-        embeddings = position + words + token_types
+        token_type_ids = token_type_ids.astype(mx.int32)
+
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
+        embeddings = inputs_embeds + token_type_embeddings
+
+        position_embeddings = self.position_embeddings(position_ids)
+        embeddings += position_embeddings
 
         return self.LayerNorm(embeddings)
 
+    def create_position_ids_from_inputs_embeds(self, inputs_embeds: mx.array):
 
-class BertSelfAttention(nn.Module):
+        input_shape = inputs_embeds.shape[:-1]
+        seq_length = input_shape[1]
+
+        position_ids = mx.arange(
+            self.padding_idx + 1,
+            seq_length + self.padding_idx + 1,
+            dtype=inputs_embeds.dtype,
+        )
+        return mx.expand_dims(position_ids, axis=0).broadcast_to(input_shape)
+
+
+class XLMRobertaSelfAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(
@@ -101,7 +146,7 @@ class BertSelfAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
 
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+            # Apply the attention mask is (precomputed for all layers in XLMRobertaModel forward() function)
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
@@ -124,8 +169,8 @@ class BertSelfAttention(nn.Module):
         return outputs
 
 
-class BertSelfOutput(nn.Module):
-    def __init__(self, config: BertConfig):
+class XLMRobertaSelfOutput(nn.Module):
+    def __init__(self, config: XLMRobertaConfig):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -134,17 +179,18 @@ class BertSelfOutput(nn.Module):
 
     def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
+        # hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
 
-class BertAttention(nn.Module):
+class XLMRobertaAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
-        self.self = BertSelfAttention(
+        self.self = XLMRobertaSelfAttention(
             config, position_embedding_type=position_embedding_type
         )
-        self.output = BertSelfOutput(config)
+        self.output = XLMRobertaSelfOutput(config)
 
     def __call__(
         self,
@@ -165,7 +211,7 @@ class BertAttention(nn.Module):
         return outputs
 
 
-class BertIntermediate(nn.Module):
+class XLMRobertaIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
@@ -180,7 +226,7 @@ class BertIntermediate(nn.Module):
         return hidden_states
 
 
-class BertOutput(nn.Module):
+class XLMRobertaOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
@@ -189,20 +235,19 @@ class BertOutput(nn.Module):
 
     def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
-        # hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
 
-class BertLayer(nn.Module):
+class XLMRobertaLayer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = BertAttention(config)
+        self.attention = XLMRobertaAttention(config)
 
-        self.intermediate = BertIntermediate(config)
-        self.output = BertOutput(config)
+        self.intermediate = XLMRobertaIntermediate(config)
+        self.output = XLMRobertaOutput(config)
 
     def __call__(
         self,
@@ -234,12 +279,12 @@ class BertLayer(nn.Module):
         return outputs
 
 
-class BertEncoder(nn.Module):
+class XLMRobertaEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.train = config.train if hasattr(config, "train") else False
 
-        self.layer = [BertLayer(config) for _ in range(config.num_hidden_layers)]
+        self.layer = [XLMRobertaLayer(config) for _ in range(config.num_hidden_layers)]
         self.gradient_checkpointing = False
 
     def __call__(
@@ -292,7 +337,7 @@ class BertEncoder(nn.Module):
         )
 
 
-class BertPooler(nn.Module):
+class XLMRobertaPooler(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
@@ -309,34 +354,17 @@ class BertPooler(nn.Module):
         return pooled_output
 
 
-class BertPredictionHeadTransform(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        if isinstance(config.hidden_act, str):
-            self.transform_act_fn = ACT2FN[config.hidden_act]
-        else:
-            self.transform_act_fn = config.hidden_act
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-
-    def __call__(self, hidden_states: mx.tanh) -> mx.tanh:
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.transform_act_fn(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states)
-        return hidden_states
-
-
-class BertModel(nn.Module):
+class XLMRobertaModel(nn.Module):
 
     def __init__(self, config, add_pooling_layer=True):
         super().__init__()
 
         self.config = config
 
-        self.embeddings = BertEmbeddings(config)
-        self.encoder = BertEncoder(config)
+        self.embeddings = XLMRobertaEmbeddings(config)
+        self.encoder = XLMRobertaEncoder(config)
 
-        self.pooler = BertPooler(config) if add_pooling_layer else None
+        self.pooler = XLMRobertaPooler(config) if add_pooling_layer else None
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -423,6 +451,6 @@ class BertModel(nn.Module):
         )
 
 
-class BertForSequenceClassification(nn.Module):
+class XLMRobertaForSequenceClassification(nn.Module):
     def __init__(self, config):
         pass

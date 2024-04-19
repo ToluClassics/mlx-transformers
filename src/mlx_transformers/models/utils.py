@@ -1,7 +1,13 @@
 from typing import Tuple
 
 import mlx.core as mx
+import mlx.nn as nn
 import numpy as np
+
+ACT2FN = {
+    "relu": nn.ReLU(),
+    "gelu": nn.GELU(),
+}
 
 
 def get_extended_attention_mask(

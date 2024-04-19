@@ -1,7 +1,6 @@
-# Contributing to mlx-examples
+# Contributing to mlx-transformers
 
-We want to make contributing to this project as easy and transparent as
-possible.
+Contributions to mlx-transformers are welcome. We need help to improve the library and add more models, adding examples and documentation, and fixing bugs.
 
 ## Pull Requests
 
@@ -41,5 +40,5 @@ clear and has sufficient instructions to be able to reproduce the issue.
 
 ## License
 
-By contributing to mlx-examples, you agree that your contributions will be licensed
+By contributing to mlx-transformers, you agree that your contributions will be licensed
 under the LICENSE file in the root directory of this source tree.
