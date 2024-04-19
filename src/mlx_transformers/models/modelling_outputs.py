@@ -21,3 +21,12 @@ class BaseModelOutputWithPoolingAndCrossAttentions:
     past_key_values: Optional[Tuple[Tuple[mx.array]]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None
     cross_attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class SequenceClassifierOutput:
+    loss: Optional[mx.array] = None
+    logits: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+    
