@@ -45,6 +45,8 @@ A list of the available models can be found in the `mlx_transformers.models` mod
     config = BertConfig.from_pretrained("bert-base-uncased")
     model = MLXBertModel(config)
 
+    model.load_weights("bert-base-uncased.npz", strict=True)
+
     sample_input = "Hello, world!"
     inputs = tokenizer(sample_input, return_tensors="np")
     outputs = model(**inputs)
