@@ -30,3 +30,20 @@ class SequenceClassifierOutput:
     hidden_states: Optional[Tuple[mx.array, ...]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None
     
+
+@dataclass
+class TokenClassifierOutput:
+    loss: Optional[mx.array] = None
+    logits: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class QuestionAnsweringModelOutput:
+    loss: Optional[mx.array] = None
+    start_logits: mx.array = None
+    end_logits: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+    
