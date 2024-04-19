@@ -38,3 +38,10 @@ def get_extended_attention_mask(
 
     extended_attention_mask = (1.0 - extended_attention_mask) * np.finfo(np.float32).min
     return extended_attention_mask.astype(dtype=dtype)
+
+
+def convert(model_name: str, mlx_model: str, hgf_model_class) -> None:
+    model = hgf_model_class.from_pretrained(model_name)
+    # save the tensors
+    tensors = {key: tensor.numpy() for key, tensor in model.state_dict().items()}
+    np.savez(mlx_model, **tensors)

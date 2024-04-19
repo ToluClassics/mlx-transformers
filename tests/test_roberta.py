@@ -7,13 +7,7 @@ import numpy as np
 from transformers import RobertaConfig, RobertaModel, RobertaTokenizer
 
 from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
-
-
-def convert(model_name: str, mlx_model: str) -> None:
-    model = RobertaModel.from_pretrained(model_name)
-    # save the tensors
-    tensors = {key: tensor.numpy() for key, tensor in model.state_dict().items()}
-    np.savez(mlx_model, **tensors)
+from src.mlx_transformers.models.utils import convert
 
 
 def load_model(model_name: str) -> MlxRobertaModel:
@@ -23,7 +17,7 @@ def load_model(model_name: str) -> MlxRobertaModel:
     )
 
     if not os.path.exists(weights_path):
-        convert(model_name, weights_path)
+        convert(model_name, weights_path, RobertaModel)
 
     config = RobertaConfig.from_pretrained(model_name)
     model = MlxRobertaModel(config)
