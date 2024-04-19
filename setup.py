@@ -6,6 +6,9 @@ description = "MLX transformers is a machine learning framework with similar Int
 with open("requirements.txt") as f:
     requirements = f.read().splitlines()
 
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
 
 setuptools.setup(
     name="mlx-transformers",
@@ -13,7 +16,7 @@ setuptools.setup(
     author="Ogundepo Odunayo",
     author_email="ogundepoodunayo@gmail.com",
     description=description,
-    long_description=description,
+    long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/ToluClassics/mlx-transformers",
     install_requires=requirements,
