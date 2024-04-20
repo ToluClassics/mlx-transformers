@@ -1,4 +1,9 @@
-from .bert import BertForSequenceClassification, BertModel
+from .bert import (
+    BertModel,
+    BertForSequenceClassification,
+    BertForTokenClassification,
+    BertForQuestionAnswering
+)
 from .roberta import (
     RobertaModel,
     RobertaForSequenceClassification,
