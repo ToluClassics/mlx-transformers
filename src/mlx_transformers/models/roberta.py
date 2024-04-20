@@ -475,15 +475,13 @@ class RobertaClassificationHead(nn.Module):
 
 class RobertaForSequenceClassification(nn.Module):
     def __init__(self, config):
-        super().__init__(config)
+        super().__init__()
         self.num_labels = config.num_labels
         self.config = config
 
         self.roberta = RobertaModel(config, add_pooling_layer=False)
         self.classifier = RobertaClassificationHead(config)
 
-        # Initialize weights and apply final processing
-        self.post_init()
 
     def __call__(
         self,
@@ -491,19 +489,12 @@ class RobertaForSequenceClassification(nn.Module):
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
-        head_mask: Optional[mx.array] = None,
-        inputs_embeds: Optional[mx.array] = None,
         labels: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], SequenceClassifierOutput]:
-        r"""
-        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
-            Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
-            config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
-            `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
-        """
+  
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.roberta(
@@ -511,13 +502,11 @@ class RobertaForSequenceClassification(nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        sequence_output = outputs[0]
+        sequence_output = outputs.last_hidden_state
         logits = self.classifier(sequence_output)
 
         loss = None
@@ -527,7 +516,7 @@ class RobertaForSequenceClassification(nn.Module):
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                elif self.num_labels > 1 and (labels.dtype == mx.array):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
@@ -559,8 +548,9 @@ class RobertaForSequenceClassification(nn.Module):
 
 class RobertaForTokenClassification(nn.Module):
     def __init__(self, config):
-        super().__init__(config)
+        super().__init__()
         self.num_labels = config.num_labels
+        self.config = config
 
         self.roberta = RobertaModel(config, add_pooling_layer=False)
         classifier_dropout = (
@@ -569,17 +559,12 @@ class RobertaForTokenClassification(nn.Module):
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-        # Initialize weights and apply final processing
-        self.post_init()
-
-    def _call_(
+    def __call__(
         self,
         input_ids: Optional[mx.array] = None,
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
-        head_mask: Optional[mx.array] = None,
-        inputs_embeds: Optional[mx.array] = None,
         labels: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -593,14 +578,12 @@ class RobertaForTokenClassification(nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
 
-        sequence_output = outputs[0]
+        sequence_output = outputs.last_hidden_state
 
         sequence_output = self.dropout(sequence_output)
         logits = self.classifier(sequence_output)
@@ -626,14 +609,12 @@ class RobertaForTokenClassification(nn.Module):
 
 class RobertaForQuestionAnswering(nn.Module):
     def __init__(self, config):
-        super().__init__(config)
+        super().__init__()
         self.num_labels = config.num_labels
+        self.config = config
 
         self.roberta = RobertaModel(config, add_pooling_layer=False)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
-
-        # Initialize weights and apply final processing
-        self.post_init()
 
     def __call__(
         self,
@@ -641,8 +622,6 @@ class RobertaForQuestionAnswering(nn.Module):
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
-        head_mask: Optional[mx.array] = None,
-        inputs_embeds: Optional[mx.array] = None,
         start_positions: Optional[mx.array] = None,
         end_positions: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
@@ -657,14 +636,12 @@ class RobertaForQuestionAnswering(nn.Module):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )       
 
-        sequence_output = outputs[0]
+        sequence_output = outputs.last_hidden_state
 
         logits = self.qa_outputs(sequence_output)
         start_logits, end_logits = logits.split(1, dim=-1)
