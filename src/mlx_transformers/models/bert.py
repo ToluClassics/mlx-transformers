@@ -471,7 +471,9 @@ class BertForSequenceClassification(nn.Module):
 
         pooled_output = outputs.pooler_output
 
-        pooled_output = self.dropout(pooled_output)
+        if self.config.train:
+            pooled_output = self.dropout(pooled_output)
+
         logits = self.classifier(pooled_output)
 
         loss = None

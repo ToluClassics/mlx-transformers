@@ -94,6 +94,9 @@ The following models have been ported to MLX Transformers from Huggingface for i
 3. XLMRoberta
 4. M2M100
 5. Sentence Transformers
+6. CLIP -> Coming soon...
+7. Llama -> Coming soon...
+8. T5 -> Coming soon...
 
 ## Examples
 
