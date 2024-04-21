@@ -3,6 +3,7 @@ from typing import Optional
 
 import mlx.core as mx
 import mlx.nn as nn
+import numpy as np
 from transformers import LlamaConfig
 
 from .modelling_outputs import *
@@ -21,7 +22,8 @@ class LlamaRMSNorm(nn.Module):
     def __call__(self, hidden_states):
         input_dtype = hidden_states.dtype
         hidden_states = hidden_states.astype(mx.float32)
-        variance = hidden_states.power(2).mean(-1, keepdim=True)
+        variance = mx.power(hidden_states, 2)
+        variance = mx.mean(variance, axis=-1, keepdims=True)
         hidden_states = hidden_states * mx.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.astype(input_dtype)
 
@@ -53,16 +55,16 @@ class LlamaRotaryEmbedding(nn.Module):
         emb = mx.concatenate([freqs, freqs], axis=-1)
 
     def __call__(self, x, position_ids):
-        inv_freq_expanded = (
-            self.inv_freq[None, :, None]
-            .astype(mx.float32)
-            .broadcast_to(position_ids.shape[0], -1, 1)
+        inv_freq_expanded = self.inv_freq[None, :, None].astype(mx.float32)
+        inv_freq_expanded = mx.broadcast_to(
+            inv_freq_expanded, (position_ids.shape[0], inv_freq_expanded.shape[1], 1)
         )
+
         position_ids_expanded = position_ids[:, None, :].astype(mx.float32)
 
         x_dtype = x.dtype
 
-        freqs = inv_freq_expanded @ position_ids_expanded.transpose(0, 2, 1)
+        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)
         emb = mx.concatenate([freqs, freqs], axis=-1)
         cos = mx.cos(emb)
         sin = mx.sin(emb)
@@ -223,13 +225,15 @@ class LlamaAttention(nn.Module):
         value_states = self.v_proj(hidden_states)
 
         # Prepare the queries, keys and values for the attention computation
-        queries = query_states.reshape(bsz, q_len, self.n_heads, -1).transpose(
+        query_states = query_states.reshape(bsz, q_len, self.num_heads, -1).transpose(
             0, 2, 1, 3
         )
-        keys = key_states.reshape(bsz, q_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
-        values = value_states.reshape(bsz, q_len, self.n_kv_heads, -1).transpose(
-            0, 2, 1, 3
-        )
+        key_states = key_states.reshape(
+            bsz, q_len, self.num_key_value_heads, -1
+        ).transpose(0, 2, 1, 3)
+        value_states = value_states.reshape(
+            bsz, q_len, self.num_key_value_heads, -1
+        ).transpose(0, 2, 1, 3)
 
         cos, sin = self.rotary_emb(value_states, position_ids)
         query_states, key_states = apply_rotary_pos_emb(
@@ -251,6 +255,7 @@ class LlamaAttention(nn.Module):
         )
 
         if attention_mask is not None:  # no matter the length, we just slice it
+            print(attention_mask.shape)
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
             attn_weights = attn_weights + causal_mask
 
@@ -302,13 +307,15 @@ class LlamaSdpaAttention(LlamaAttention):
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
 
-        queries = query_states.reshape(bsz, q_len, self.n_heads, -1).transpose(
+        query_states = query_states.reshape(bsz, q_len, self.num_heads, -1).transpose(
             0, 2, 1, 3
         )
-        keys = key_states.reshape(bsz, q_len, self.n_kv_heads, -1).transpose(0, 2, 1, 3)
-        values = value_states.reshape(bsz, q_len, self.n_kv_heads, -1).transpose(
-            0, 2, 1, 3
-        )
+        key_states = key_states.reshape(
+            bsz, q_len, self.num_key_value_heads, -1
+        ).transpose(0, 2, 1, 3)
+        value_states = value_states.reshape(
+            bsz, q_len, self.num_key_value_heads, -1
+        ).transpose(0, 2, 1, 3)
 
         cos, sin = self.rotary_emb(value_states, position_ids)
         query_states, key_states = apply_rotary_pos_emb(
@@ -355,6 +362,8 @@ class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
+
+        print(config._attn_implementation)
 
         self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
@@ -411,6 +420,7 @@ class LlamaDecoderLayer(nn.Module):
 class LlamaModel(nn.Module):
     def __init__(self, config: LlamaConfig):
         super().__init__()
+        self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
@@ -430,16 +440,16 @@ class LlamaModel(nn.Module):
 
     def __call__(
         self,
-        input_ids,
-        attention_mask,
-        position_ids,
-        past_key_values,
-        input_embeds,
-        use_cache,
-        output_attentions,
-        output_hidden_states,
-        return_dict,
-        cache_position,
+        input_ids=None,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        cache_position=None,
     ):
         output_attentions = (
             output_attentions
@@ -459,8 +469,17 @@ class LlamaModel(nn.Module):
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
+        past_seen_tokens = 0
+
+        if cache_position is None:
+            cache_position = mx.arange(
+                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1]
+            )
+
         # TODO: implement cache
-        causal_mask = self.create_additive_causal_mask(input_ids.shape[1])
+        causal_mask = self._update_causal_mask(
+            attention_mask, inputs_embeds, cache_position, past_seen_tokens
+        )
 
         hidden_states = inputs_embeds
 
@@ -516,14 +535,76 @@ class LlamaModel(nn.Module):
             attentions=all_self_attns,
         )
 
-    def create_additive_causal_mask(self, N: int, dtype: mx.Dtype = mx.float32):
-        indices = mx.arange(N)
+    def _update_causal_mask(
+        self,
+        attention_mask: mx.array,
+        input_tensor: mx.array,
+        cache_position: mx.array,
+        past_seen_tokens: int,
+    ):
 
-        mask = indices[:, None] < indices[None]
-        # usually inf but 1e9 is as good and softmax(full(1e9)) != nan
-        # TODO: Should replace this with finfo(dtype).min
-        mask = mask.astype(dtype) * -1e9
-        return mask
+        dtype = input_tensor.dtype
+        min_dtype = np.finfo(np.float32).min
+        sequence_length = input_tensor.shape[1]
+        if hasattr(
+            getattr(self.layers[0], "self_attn", {}), "past_key_value"
+        ):  # static cache
+            target_length = self.config.max_position_embeddings
+        else:  # dynamic cache
+            print(type(attention_mask))
+            target_length = (
+                attention_mask.shape[-1]
+                if isinstance(attention_mask, mx.array)
+                or isinstance(attention_mask, np.ndarray)
+                else past_seen_tokens + sequence_length + 1
+            )
+
+        print((sequence_length, target_length))
+        causal_mask = mx.full(
+            (sequence_length, target_length), vals=min_dtype, dtype=dtype
+        )
+        if sequence_length != 1:
+            causal_mask = mx.triu(causal_mask, k=1)
+
+        causal_mask *= mx.arange(target_length) > cache_position.reshape(-1, 1)
+        causal_mask = causal_mask[None, None, :, :]
+        causal_mask = mx.broadcast_to(
+            causal_mask, (input_tensor.shape[0], 1, sequence_length, target_length)
+        )
+        if attention_mask is not None:
+            # causal_mask = causal_mask.clone()  # copy to contiguous memory for in-place edit
+            if len(attention_mask.shape) == 2:
+                mask_length = attention_mask.shape[-1]
+
+                attention_mask = np.array(attention_mask)
+                causal_mask = np.array(causal_mask)
+
+                padding_mask = (causal_mask[..., :mask_length] == 0.0) * (
+                    attention_mask[:, None, None, :] == 0.0
+                )
+
+                causal_mask[..., :mask_length] = np.ma.array(
+                    data=causal_mask[..., :mask_length], mask=padding_mask
+                ).filled(min_dtype)
+
+            elif len(attention_mask.shape) == 4:
+                # backwards compatibility: we allow passing a 4D attention mask shorter than the input length with
+                # cache. In that case, the 4D attention mask attends to the newest tokens only.
+                if attention_mask.shape[-2] < cache_position[0] + sequence_length:
+                    offset = cache_position[0]
+                else:
+                    offset = 0
+                mask_shape = attention_mask.shape
+                mask_slice = (attention_mask == 0.0).to(dtype=dtype) * min_dtype
+                causal_mask[
+                    : mask_shape[0],
+                    : mask_shape[1],
+                    offset : mask_shape[2] + offset,
+                    : mask_shape[3],
+                ] = mask_slice
+
+        causal_mask = mx.array(causal_mask)
+        return causal_mask
 
 
 class LlamaForCausalLM(nn.Module):
@@ -531,6 +612,7 @@ class LlamaForCausalLM(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.config = config
         self.model = LlamaModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
@@ -556,16 +638,16 @@ class LlamaForCausalLM(nn.Module):
     def __call__(
         self,
         input_ids,
-        attention_mask,
-        position_ids,
-        past_key_values,
-        inputs_embeds,
-        labels,
-        use_cache,
-        output_attentions,
-        output_hidden_states,
-        return_dict,
-        cache_position,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        labels=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        cache_position=None,
     ):
         output_attentions = (
             output_attentions
@@ -581,6 +663,21 @@ class LlamaForCausalLM(nn.Module):
             return_dict if return_dict is not None else self.config.use_return_dict
         )
 
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.astype(mx.int32).cumsum(-1) - 1
+            position_ids, attention_mask = np.array(position_ids), np.array(
+                attention_mask
+            )
+
+            position_ids = np.ma.array(
+                data=position_ids, mask=attention_mask == 0
+            ).filled(1)
+            print(position_ids)
+            position_ids = mx.array(position_ids)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
+
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -594,10 +691,10 @@ class LlamaForCausalLM(nn.Module):
             cache_position=cache_position,
         )
 
-        hidden_states = outputs[0]
+        hidden_states = outputs.last_hidden_state
         logits = self.lm_head(hidden_states)
 
-        logits = logits.float()
+        logits = logits.astype(mx.float32)
         loss = None
 
         if labels is not None:

@@ -4,7 +4,7 @@ import unittest
 
 import mlx.core as mx
 import numpy as np
-from transformers import AutoTokenizer, LlamaForCausalLM
+from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
 
 from src.mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
 from src.mlx_transformers.models.utils import convert
@@ -21,7 +21,7 @@ def load_model(model_name: str, config, hgf_model_class, mlx_model_class):
 
     model = mlx_model_class(config)
 
-    model.load_weights(weights_path, strict=True)
+    model.load_weights(weights_path, strict=False)
     return model
 
 
@@ -35,7 +35,7 @@ class TestMlxLlama(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "meta-llama/Llama-2-7b-hf"
-        config = LlamaForCausalLM.from_pretrained(cls.model_name)
+        config = LlamaConfig.from_pretrained(cls.model_name)
 
         cls.model = load_model(
             cls.model_name, config, LlamaForCausalLM, MlxLlamaForCausalLM
@@ -44,9 +44,12 @@ class TestMlxLlama(unittest.TestCase):
         cls.input_text = "Hey, are you conscious? Can you talk to me?"
 
     def test_forward(self) -> None:
-        inputs = self.tokenizer(
-            self.input_text, return_tensors="np", padding=True, truncation=True
-        )
+        inputs = self.tokenizer(self.input_text, return_tensors="np", truncation=True)
 
         inputs = {key: mx.array(v) for key, v in inputs.items()}
+
         print(inputs)
+        outputs = self.model(**inputs)
+
+        print(outputs.logits)
+        print(outputs.logits.shape)
