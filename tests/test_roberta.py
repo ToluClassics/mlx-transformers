@@ -21,7 +21,7 @@ from src.mlx_transformers.models import RobertaForQuestionAnswering as MlxRobert
 from src.mlx_transformers.models.utils import convert
 
 
-def load_model(model_name: str, model_class, hgf_model_class):
+def load_model(model_name: str, mlx_model_class, hgf_model_class):
     current_directory = os.path.dirname(os.path.realpath(__file__))
     weights_path = os.path.join(
         current_directory,
@@ -35,7 +35,7 @@ def load_model(model_name: str, model_class, hgf_model_class):
 
     config = RobertaConfig.from_pretrained(model_name)
     # print(config)
-    model = model_class(config)
+    model = mlx_model_class(config)
 
     model.load_weights(weights_path, strict=True)
 
