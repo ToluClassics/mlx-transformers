@@ -38,20 +38,8 @@ def get_extended_attention_mask(
     return extended_attention_mask.astype(dtype=dtype)
 
 
-def convert(model_name: str, mlx_model: str) -> None:
-
-    architecture = mlx_model.config.architectures[0]
-    transformers_module = importlib.import_module("transformers")
-
-    _class = getattr(transformers_module, architecture, None)
-
-    model = _class.from_pretrained(model_name)
-    # # save the tensors
-    tensors = {
-        key: mx.array(tensor.numpy()) for key, tensor in model.state_dict().items()
-    }
-    print(tensors)
-
-    tensors = [(key, tensor) for key, tensor in tensors.items()]
-
-    return tensors
+def convert(model_name: str, mlx_model: str, hgf_model_class) -> None:
+    model = hgf_model_class.from_pretrained(model_name)
+    # save the tensors
+    tensors = {key: tensor.numpy() for key, tensor in model.state_dict().items()}
+    np.savez(mlx_model, **tensors)
