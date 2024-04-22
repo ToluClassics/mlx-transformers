@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,5 +67,22 @@ class QuestionAnsweringModelOutput:
     loss: Optional[mx.array] = None
     start_logits: mx.array = None
     end_logits: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class BaseModelOutputWithPast:
+    last_hidden_state: mx.array = None
+    past_key_values: Optional[Tuple[Tuple[mx.array]]] = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class CausalLMOutputWithPast:
+    loss: Optional[mx.array] = None
+    logits: mx.array = None
+    past_key_values: Optional[Tuple[Tuple[mx.array]]] = None
     hidden_states: Optional[Tuple[mx.array, ...]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None

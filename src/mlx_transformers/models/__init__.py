@@ -4,6 +4,7 @@ from .bert import (
     BertForTokenClassification,
     BertForQuestionAnswering
 )
+from .llama import LlamaForCausalLM, LlamaModel
 from .roberta import (
     RobertaModel,
     RobertaForSequenceClassification,

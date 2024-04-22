@@ -4,10 +4,7 @@ import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-ACT2FN = {
-    "relu": nn.ReLU(),
-    "gelu": nn.GELU(),
-}
+ACT2FN = {"relu": nn.ReLU(), "gelu": nn.GELU(), "silu": nn.SiLU()}
 
 
 def get_extended_attention_mask(
