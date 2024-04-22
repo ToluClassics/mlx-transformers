@@ -21,6 +21,8 @@ def load_model(model_name: str, config, hgf_model_class, mlx_model_class):
 
     model = mlx_model_class(config)
 
+    print(model)
+
     model.load_weights(weights_path, strict=False)
     return model
 
@@ -47,9 +49,6 @@ class TestMlxLlama(unittest.TestCase):
         inputs = self.tokenizer(self.input_text, return_tensors="np", truncation=True)
 
         inputs = {key: mx.array(v) for key, v in inputs.items()}
+        outputs = self.model(**inputs, use_cache=True)
 
-        print(inputs)
-        outputs = self.model(**inputs)
-
-        print(outputs.logits)
-        print(outputs.logits.shape)
+        assert type(outputs.last_hidden_state) == mx.array

@@ -240,12 +240,16 @@ class LlamaAttention(nn.Module):
             query_states, key_states, cos, sin
         )
 
+        print("key states", key_states.shape)
+
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )
+
+            print("key states updated", key_states.shape)
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -255,8 +259,13 @@ class LlamaAttention(nn.Module):
         )
 
         if attention_mask is not None:  # no matter the length, we just slice it
-            print(attention_mask.shape)
+            print("attention mask", attention_mask.shape)
+            print("key states", key_states.shape)
+            print("attention weights", attn_weights.shape)
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
+
+            print("causal mask", causal_mask.shape)
+            print("=====================================")
             attn_weights = attn_weights + causal_mask
 
         attn_weights = mx.softmax(attn_weights.astype(mx.float32), axis=-1).astype(
@@ -362,9 +371,6 @@ class LlamaDecoderLayer(nn.Module):
     def __init__(self, config: LlamaConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
-
-        print(config._attn_implementation)
-
         self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
         )
@@ -470,11 +476,17 @@ class LlamaModel(nn.Module):
             inputs_embeds = self.embed_tokens(input_ids)
 
         past_seen_tokens = 0
+        if use_cache:
+            past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+            past_seen_tokens = past_key_values.get_seq_length()
 
         if cache_position is None:
             cache_position = mx.arange(
                 past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1]
             )
+
+        if position_ids is None:
+            position_ids = mx.expand_dims(cache_position, axis=0)
 
         # TODO: implement cache
         causal_mask = self._update_causal_mask(
@@ -503,7 +515,6 @@ class LlamaModel(nn.Module):
             )
 
             hidden_states = layer_outputs[0]
-
             if use_cache:
                 next_decoder_cache = layer_outputs[2 if output_attentions else 1]
 
@@ -528,6 +539,7 @@ class LlamaModel(nn.Module):
                 for v in [hidden_states, next_cache, all_hidden_states, all_self_attns]
                 if v is not None
             )
+
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
@@ -551,15 +563,12 @@ class LlamaModel(nn.Module):
         ):  # static cache
             target_length = self.config.max_position_embeddings
         else:  # dynamic cache
-            print(type(attention_mask))
             target_length = (
                 attention_mask.shape[-1]
                 if isinstance(attention_mask, mx.array)
                 or isinstance(attention_mask, np.ndarray)
                 else past_seen_tokens + sequence_length + 1
             )
-
-        print((sequence_length, target_length))
         causal_mask = mx.full(
             (sequence_length, target_length), vals=min_dtype, dtype=dtype
         )
@@ -604,6 +613,8 @@ class LlamaModel(nn.Module):
                 ] = mask_slice
 
         causal_mask = mx.array(causal_mask)
+
+        print("causal mask", causal_mask.shape)
         return causal_mask
 
 
@@ -673,7 +684,6 @@ class LlamaForCausalLM(nn.Module):
             position_ids = np.ma.array(
                 data=position_ids, mask=attention_mask == 0
             ).filled(1)
-            print(position_ids)
             position_ids = mx.array(position_ids)
             if past_key_values:
                 position_ids = position_ids[:, -input_ids.shape[1] :]
@@ -712,3 +722,41 @@ class LlamaForCausalLM(nn.Module):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+
+    def generate(self, inputs: Dict, max_length: int, **kwargs):
+        temp = kwargs.get("temp", 1.0)
+
+        def sample(logits):
+            if temp == 0:
+                return mx.argmax(logits, axis=-1)
+            else:
+                return mx.random.categorical(logits * (1 / temp))
+
+        # Process the prompt
+        use_cache = kwargs.get("use_cache", True)
+        output = self(**inputs, use_cache=use_cache)
+
+        next_token_logits = output.logits[:, -1, :]
+        next_token = sample(next_token_logits)
+
+        while True:
+            # Update the prompt
+            print(inputs["input_ids"].shape, next_token.shape)
+            print(next_token)
+            next_token = mx.expand_dims(next_token, axis=0)
+            inputs["input_ids"] = mx.concatenate(
+                [inputs["input_ids"], next_token], axis=-1
+            )
+
+            print(inputs["input_ids"])
+            inputs["attention_mask"] = mx.ones_like(inputs["input_ids"])
+
+            past_key_values = output.past_key_values
+            output = self(
+                **inputs, past_key_values=past_key_values, use_cache=use_cache
+            )
+
+            next_token_logits = output.logits[:, -1, :]
+            next_token = sample(next_token_logits)
+
+            yield next_token

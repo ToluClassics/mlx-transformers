@@ -202,17 +202,31 @@ class DynamicCache(Cache):
         if layer_idx == 0:
             self._seen_tokens += key_states.shape[-2]
 
+        print(len(self.key_cache))
+        print(layer_idx)
+
         # Update the cache
         if len(self.key_cache) <= layer_idx:
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
         else:
-            self.key_cache[layer_idx] = mx.concatenate(
-                [self.key_cache[layer_idx], key_states], axis=-2
-            )
-            self.value_cache[layer_idx] = mx.concatenate(
-                [self.value_cache[layer_idx], value_states], axis=-2
-            )
+            print("======adding to cache=====")
+            print(self.key_cache[layer_idx].shape)
+            print(key_states.shape)
+            print("======adding to cache=====")
+            import sys
+
+            sys.exit()
+
+            self.key_cache[layer_idx] = key_states
+            self.value_cache[layer_idx] = value_states
+
+            # self.key_cache[layer_idx] = mx.concatenate(
+            #     [self.key_cache[layer_idx], key_states], axis=-2
+            # )
+            # self.value_cache[layer_idx] = mx.concatenate(
+            #     [self.value_cache[layer_idx], value_states], axis=-2
+            # )
 
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
@@ -225,3 +239,22 @@ class DynamicCache(Cache):
     def get_max_length(self) -> Optional[int]:
         """Returns the maximum sequence length of the cached states. DynamicCache does not have a maximum length."""
         return None
+
+    def to_legacy_cache(self) -> Tuple[Tuple[mx.array], Tuple[mx.array]]:
+        """Converts the `DynamicCache` instance into the its equivalent in the legacy cache format."""
+        legacy_cache = ()
+        for layer_idx in range(len(self)):
+            legacy_cache += ((self.key_cache[layer_idx], self.value_cache[layer_idx]),)
+        return legacy_cache
+
+    @classmethod
+    def from_legacy_cache(
+        cls, past_key_values: Optional[Tuple[Tuple[mx.array]]] = None
+    ) -> "DynamicCache":
+        """Converts a cache in the legacy cache format into an equivalent `DynamicCache`."""
+        cache = cls()
+        if past_key_values is not None:
+            for layer_idx in range(len(past_key_values)):
+                key_states, value_states = past_key_values[layer_idx]
+                cache.update(key_states, value_states, layer_idx)
+        return cache
