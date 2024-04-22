@@ -20,32 +20,17 @@ pip install mlx-transformers
 
 A list of the available models can be found in the `mlx_transformers.models` module and are also listed in the [section below](#available-model-architectures). The following example demonstrates how to load a model and use it for inference:
 
-- First you need to download and convert the model checkpoint to MLX format
-    To do this from huggingface
 
-    ```python
-
-    from transformers import BertModel
-    from mlx_transformers.models.utils import convert
-
-    model_name_or_path = "bert-base-uncased"
-    mlx_checkpoint = "bert-base-uncased.npz"
-
-    convert("bert-base-uncased", "bert-base-uncased.npz", BertModel)
-    ```
-    This will download the model checkpoint from huggingface and convert it to MLX format.
-
-- Now you can load the model using MLX transformers in few lines of code
+- You can load the model using MLX transformers in few lines of code
 
     ```python
     from transformers import BertConfig, BertTokenizer
-    from mlx_transformers.models import BertModel as MLXBertModel
+    from mlx_transformers.models import BertForMaskedLM as MLXBertForMaskedLM
 
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     config = BertConfig.from_pretrained("bert-base-uncased")
-    model = MLXBertModel(config)
-
-    model.load_weights("bert-base-uncased.npz", strict=True)
+    model = BertForMaskedLM(config)
+    model.from_pretrained("bert-base-uncased")
 
     sample_input = "Hello, world!"
     inputs = tokenizer(sample_input, return_tensors="np")
@@ -76,7 +61,7 @@ tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v
 config = AutoConfig.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
 
 model = MLXBertModel(config)
-model.load_weights("all-MiniLM-L6-v2.npz", strict=True)
+model.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
 inputs = tokenizer(sentences, return_tensors="np", padding=True, truncation=True)
 outputs = model(**inputs)

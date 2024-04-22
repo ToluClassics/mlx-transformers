@@ -8,6 +8,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from transformers import BertConfig
 
+from .base import MlxPretrainedMixin
 from .modelling_outputs import *
 from .utils import ACT2FN, get_extended_attention_mask
 
@@ -319,14 +320,14 @@ class BertPredictionHeadTransform(nn.Module):
             self.transform_act_fn = config.hidden_act
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-    def __call__(self, hidden_states: mx.tanh) -> mx.tanh:
+    def __call__(self, hidden_states: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
         hidden_states = self.transform_act_fn(hidden_states)
         hidden_states = self.LayerNorm(hidden_states)
         return hidden_states
 
 
-class BertModel(nn.Module):
+class BertModel(nn.Module, MlxPretrainedMixin):
 
     def __init__(self, config, add_pooling_layer=True):
         super().__init__()
@@ -423,7 +424,94 @@ class BertModel(nn.Module):
         )
 
 
-class BertForSequenceClassification(nn.Module):
+class BertLMPredictionHead(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.transform = BertPredictionHeadTransform(config)
+
+        # The output weights are the same as the input embeddings, but there is
+        # an output-only bias for each token.
+        self.decoder = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        self.bias = mx.zeros(config.vocab_size)
+
+        # Need a link between the two variables so that the bias is correctly resized with `resize_token_embeddings`
+        self.decoder.bias = self.bias
+
+    def __call__(self, hidden_states):
+        hidden_states = self.transform(hidden_states)
+        hidden_states = self.decoder(hidden_states)
+        return hidden_states
+
+
+class BertOnlyMLMHead(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.predictions = BertLMPredictionHead(config)
+
+    def __call__(self, sequence_output: mx.array) -> mx.array:
+        prediction_scores = self.predictions(sequence_output)
+        return prediction_scores
+
+
+class BertForMaskedLM(nn.Module, MlxPretrainedMixin):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.bert = BertModel(config, add_pooling_layer=False)
+        self.cls = BertOnlyMLMHead(config)
+
+    def __call__(
+        self,
+        input_ids: Optional[mx.array] = None,
+        attention_mask: Optional[mx.array] = None,
+        token_type_ids: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        use_cache: Optional[bool] = None,
+        labels: Optional[mx.array] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = outputs.last_hidden_state
+        prediction_scores = self.cls(sequence_output)
+
+        masked_lm_loss = None
+        if labels is not None:
+            loss_fct = nn.losses.cross_entropy  # -100 index = padding token
+            masked_lm_loss = loss_fct(
+                prediction_scores.view(-1, self.config.vocab_size), labels.view(-1)
+            )
+
+        if not return_dict:
+            output = (prediction_scores,) + outputs[2:]
+            return (
+                ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
+            )
+
+        return MaskedLMOutput(
+            loss=masked_lm_loss,
+            logits=prediction_scores,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
+class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
@@ -437,6 +525,7 @@ class BertForSequenceClassification(nn.Module):
         )
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        self.train = config.train if hasattr(config, "train") else False
 
     def __call__(
         self,
@@ -471,7 +560,7 @@ class BertForSequenceClassification(nn.Module):
 
         pooled_output = outputs.pooler_output
 
-        if self.config.train:
+        if self.train:
             pooled_output = self.dropout(pooled_output)
 
         logits = self.classifier(pooled_output)
@@ -512,7 +601,7 @@ class BertForSequenceClassification(nn.Module):
         )
 
 
-class BertForTokenClassification(nn.Module):
+class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
@@ -520,11 +609,12 @@ class BertForTokenClassification(nn.Module):
         self.config = config
         self.bert = BertModel(config, add_pooling_layer=False)
         classifier_dropout = (
-            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
+            config.classifier_dropout
+            if config.classifier_dropout is not None
+            else config.hidden_dropout_prob
         )
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-
 
     def __call__(
         self,
@@ -541,8 +631,9 @@ class BertForTokenClassification(nn.Module):
         labels (`mx.array` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the token classification loss. Indices should be in `[0, ..., config.num_labels - 1]`.
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.bert(
             input_ids,
@@ -561,7 +652,7 @@ class BertForTokenClassification(nn.Module):
 
         loss = None
         if labels is not None:
-            loss_fct = nn.losses.cross_entropy()
+            loss_fct = nn.losses.cross_entropy
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         if not return_dict:
@@ -573,10 +664,10 @@ class BertForTokenClassification(nn.Module):
             logits=logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-        )        
+        )
 
 
-class BertForQuestionAnswering(nn.Module):
+class BertForQuestionAnswering(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
@@ -584,7 +675,6 @@ class BertForQuestionAnswering(nn.Module):
 
         self.bert = BertModel(config, add_pooling_layer=False)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
-
 
     def __call__(
         self,
@@ -608,7 +698,9 @@ class BertForQuestionAnswering(nn.Module):
             Positions are clamped to the length of the sequence (`sequence_length`). Position outside of the sequence
             are not taken into account for computing the loss.
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.bert(
             input_ids,
@@ -640,7 +732,7 @@ class BertForQuestionAnswering(nn.Module):
             start_positions = start_positions.clamp(0, ignored_index)
             end_positions = end_positions.clamp(0, ignored_index)
 
-            loss_fct = nn.losses.cross_entropy(ignore_index=ignored_index)
+            loss_fct = nn.losses.cross_entropy
             start_loss = loss_fct(start_logits, start_positions)
             end_loss = loss_fct(end_logits, end_positions)
             total_loss = (start_loss + end_loss) / 2
@@ -656,4 +748,3 @@ class BertForQuestionAnswering(nn.Module):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    
