@@ -2,6 +2,7 @@ import argparse
 import os
 import time
 from pathlib import Path
+from typing import Tuple
 
 import mlx.core as mx
 from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
@@ -11,15 +12,31 @@ from mlx_transformers.models.utils import convert
 
 
 def tic():
+    "Return generation time in seconds"
     return time.time()
 
 
 def toc(msg, start):
+    "Return generation time in seconds and a message"
     end = time.time()
     return f"[INFO] {msg}: {end - start:.3f} s"
 
 
-def load_model(model_name: str, model_weights: str, hgf_model_class, mlx_model_class):
+def load_model(
+    model_name: str, model_weights: str, hgf_model_class, mlx_model_class
+) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
+    """
+    Load a llama model and tokenizer from the given model name and weights.
+
+    Args:
+        model_name (str): Name of the llama model to load
+        model_weights (str): Path to the model weights
+        hgf_model_class: Huggingface model class
+        mlx_model_class: Mlx model class
+
+    Returns:
+        _type_: _description_
+    """
     config = LlamaConfig.from_pretrained(model_name)
     current_directory = os.path.dirname(os.path.realpath(__file__))
 
@@ -31,7 +48,7 @@ def load_model(model_name: str, model_weights: str, hgf_model_class, mlx_model_c
     return model, tokenizer
 
 
-def generate(model, tokenizer, args):
+def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
     inputs = tokenizer(args.prompt, return_tensors="np", truncation=True)
 
@@ -42,8 +59,6 @@ def generate(model, tokenizer, args):
     start = tic()
     for token in model.generate(inputs, args.temp):
         tokens.append(token)
-
-        print(tokenizer.decode(inputs["input_ids"][0].tolist() + [token.item()]))
 
         if len(tokens) == 1:
             # Actually perform the computation to measure the prompt processing time
@@ -85,11 +100,6 @@ if __name__ == "__main__":
         "--prompt",
         help="The message to be processed by the model. Ignored when --few-shot is provided.",
         default="In the beginning the Universe was created.",
-    )
-    parser.add_argument(
-        "--few-shot",
-        help="Read a few shot prompt from a file (as in `sample_prompt.txt`).",
-        required=False,
     )
     parser.add_argument(
         "--max-tokens", "-m", type=int, default=100, help="How many tokens to generate"

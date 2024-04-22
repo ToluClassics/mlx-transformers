@@ -95,12 +95,17 @@ The following models have been ported to MLX Transformers from Huggingface for i
 4. M2M100
 5. Sentence Transformers
 6. CLIP -> Coming soon...
-7. Llama -> Coming soon...
+7. Llama
 8. T5 -> Coming soon...
 
 ## Examples
 
-Coming soon...
+The `examples` directory contains a few examples that demonstrate how to use the models in MLX Transformers. 
+
+1. [LLama Example](examples/llama_generation.py)
+    ```bash
+    python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf" --model-path meta-llama-Llama-2-7b-hf.npz 
+    ```
 
 ## Benchmarks
 

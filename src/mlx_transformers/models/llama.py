@@ -6,6 +6,7 @@ import mlx.nn as nn
 import numpy as np
 from transformers import LlamaConfig
 
+from .cache import Cache, DynamicCache
 from .modelling_outputs import *
 from .utils import ACT2FN
 
@@ -346,9 +347,9 @@ class LlamaSdpaAttention(LlamaAttention):
             causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
 
         attn_output = mx.fast.scaled_dot_product_attention(
-            queries,
-            keys,
-            values,
+            query_states,
+            key_states,
+            value_states,
             scale=self.self.config.rope_scaling["factor"],
             mask=causal_mask,
         )
