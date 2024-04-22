@@ -525,17 +525,17 @@ class XLMRobertaForSequenceClassification(nn.Module):
                     self.config.problem_type = "multi_label_classification"
 
             if self.config.problem_type == "regression":
-                loss_fct = nn.losses.mse_loss()
+                loss_fct = nn.losses.mse_loss
                 if self.num_labels == 1:
                     loss = loss_fct(logits.squeeze(), labels.squeeze())
                 else:
                     loss = loss_fct(logits, labels)
             elif self.config.problem_type == "single_label_classification":
-                loss_fct = nn.losses.cross_entropy()
+                loss_fct = nn.losses.cross_entropy
                 loss = loss_fct(
                     logits.view(-1, self.num_labels), labels.view(-1))
             elif self.config.problem_type == "multi_label_classification":
-                loss_fct = nn.losses.binary_cross_entropy()
+                loss_fct = nn.losses.binary_cross_entropy
                 loss = loss_fct(logits, labels)
 
         if not return_dict:
@@ -597,7 +597,7 @@ class XLMRobertaForTokenClassification(nn.Module):
         if labels is not None:
             # move labels to correct device to enable model parallelism
             labels = labels.to(logits.device)
-            loss_fct = nn.losses.cross_entropy()
+            loss_fct = nn.losses.cross_entropy
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         if not return_dict:
@@ -666,7 +666,7 @@ class XLMRobertaForQuestionAnswering(nn.Module):
             start_positions = start_positions.clamp(0, ignored_index)
             end_positions = end_positions.clamp(0, ignored_index)
 
-            loss_fct = nn.losses.cross_entropy()
+            loss_fct = nn.losses.cross_entropy
             start_loss = loss_fct(start_logits, start_positions)
             end_loss = loss_fct(end_logits, end_positions)
             total_loss = (start_loss + end_loss) / 2
@@ -683,3 +683,4 @@ class XLMRobertaForQuestionAnswering(nn.Module):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+    
