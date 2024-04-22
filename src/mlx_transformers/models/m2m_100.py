@@ -417,6 +417,7 @@ class M2M100Decoder(nn.Module):
 
         # create causal mask
         # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        # TODO: Fix this
         combined_attention_mask = _prepare_4d_causal_attention_mask(
             torch.tensor(np.array(attention_mask)),
             input_shape,

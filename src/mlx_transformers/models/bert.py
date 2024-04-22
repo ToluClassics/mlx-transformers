@@ -188,9 +188,14 @@ class BertOutput(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
+        self.train = config.train if hasattr(config, "train") else False
+
     def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
-        # hidden_states = self.dropout(hidden_states)
+
+        if self.train:
+            hidden_states = self.dropout(hidden_states)
+
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
@@ -304,6 +309,8 @@ class BertPooler(nn.Module):
         # to the first token.
         first_token_tensor = hidden_states[:, 0]
         pooled_output = self.dense(first_token_tensor)
+
+        # TODO: fix tanh
         # pooled_output = self.activation(pooled_output)
 
         pooled_output = mx.tanh(pooled_output)
@@ -616,6 +623,8 @@ class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
+        self.train = config.train if hasattr(config, "train") else False
+
     def __call__(
         self,
         input_ids: Optional[mx.array] = None,
@@ -647,7 +656,9 @@ class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
 
         sequence_output = outputs.last_hidden_state
 
-        sequence_output = self.dropout(sequence_output)
+        if self.train:
+            sequence_output = self.dropout(sequence_output)
+
         logits = self.classifier(sequence_output)
 
         loss = None

@@ -29,7 +29,7 @@ A list of the available models can be found in the `mlx_transformers.models` mod
 
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     config = BertConfig.from_pretrained("bert-base-uncased")
-    model = BertForMaskedLM(config)
+    model = MLXBertForMaskedLM(config)
     model.from_pretrained("bert-base-uncased")
 
     sample_input = "Hello, world!"
@@ -79,8 +79,8 @@ The following models have been ported to MLX Transformers from Huggingface for i
 3. XLMRoberta
 4. M2M100
 5. Sentence Transformers
-6. CLIP -> Coming soon...
-7. Llama
+6. Llama
+7. CLIP -> Coming soon...
 8. T5 -> Coming soon...
 
 ## Examples
