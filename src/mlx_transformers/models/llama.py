@@ -6,6 +6,7 @@ import mlx.nn as nn
 import numpy as np
 from transformers import LlamaConfig
 
+from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
 from .modelling_outputs import *
 from .utils import ACT2FN
@@ -241,16 +242,12 @@ class LlamaAttention(nn.Module):
             query_states, key_states, cos, sin
         )
 
-        print("key states", key_states.shape)
-
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )
-
-            print("key states updated", key_states.shape)
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -260,13 +257,7 @@ class LlamaAttention(nn.Module):
         )
 
         if attention_mask is not None:  # no matter the length, we just slice it
-            print("attention mask", attention_mask.shape)
-            print("key states", key_states.shape)
-            print("attention weights", attn_weights.shape)
             causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-
-            print("causal mask", causal_mask.shape)
-            print("=====================================")
             attn_weights = attn_weights + causal_mask
 
         attn_weights = mx.softmax(attn_weights.astype(mx.float32), axis=-1).astype(
@@ -615,12 +606,10 @@ class LlamaModel(nn.Module):
 
         causal_mask = mx.array(causal_mask)
 
-        print("causal mask", causal_mask.shape)
         return causal_mask
 
 
-class LlamaForCausalLM(nn.Module):
-    _tied_weights_keys = ["lm_head.weight"]
+class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
 
     def __init__(self, config):
         super().__init__()
@@ -742,14 +731,10 @@ class LlamaForCausalLM(nn.Module):
 
         while True:
             # Update the prompt
-            print(inputs["input_ids"].shape, next_token.shape)
-            print(next_token)
             next_token = mx.expand_dims(next_token, axis=0)
             inputs["input_ids"] = mx.concatenate(
                 [inputs["input_ids"], next_token], axis=-1
             )
-
-            print(inputs["input_ids"])
             inputs["attention_mask"] = mx.ones_like(inputs["input_ids"])
 
             past_key_values = output.past_key_values
