@@ -25,22 +25,25 @@ def create_position_ids_from_input_ids(
     mask = (input_ids != padding_idx).astype(mx.int16)
 
     incremental_indices = (
-        mx.cumsum(mask, axis=1).astype(input_ids.dtype) + past_key_values_length
-    ) * mask
+        mx.cumsum(
+            mask, axis=1).astype(
+            input_ids.dtype) + past_key_values_length) * mask
     return incremental_indices + padding_idx
 
 
 class RobertaEmbeddings(nn.Module):
     def __init__(self, config: RobertaConfig):
         super().__init__()
-        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size)
+        self.word_embeddings = nn.Embedding(
+            config.vocab_size, config.hidden_size)
         self.token_type_embeddings = nn.Embedding(
             config.type_vocab_size, config.hidden_size
         )
         self.position_embeddings = nn.Embedding(
             config.max_position_embeddings, config.hidden_size
         )
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.padding_idx = config.pad_token_id
 
@@ -102,15 +105,14 @@ class RobertaSelfAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(
-            config, "embedding_size"
-        ):
+                config, "embedding_size"):
             raise ValueError(
                 f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
-                f"heads ({config.num_attention_heads})"
-            )
+                f"heads ({config.num_attention_heads})")
 
         self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.attention_head_size = int(
+            config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
         self.query = nn.Linear(config.hidden_size, self.all_head_size)
@@ -140,13 +142,16 @@ class RobertaSelfAttention(nn.Module):
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
-        # Take the dot product between "query" and "key" to get the raw attention scores.
+        # Take the dot product between "query" and "key" to get the raw
+        # attention scores.
         attention_scores = query_layer @ key_layer.transpose(0, 1, 3, 2)
 
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        attention_scores = attention_scores / \
+            math.sqrt(self.attention_head_size)
 
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in RobertaModel forward() function)
+            # Apply the attention mask is (precomputed for all layers in
+            # RobertaModel forward() function)
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
@@ -164,8 +169,10 @@ class RobertaSelfAttention(nn.Module):
         context_layer = context_layer.reshape(B, L, -1)
 
         outputs = (
-            (context_layer, attention_probs) if output_attentions else (context_layer,)
-        )
+            (context_layer,
+             attention_probs) if output_attentions else (
+                context_layer,
+            ))
         return outputs
 
 
@@ -173,11 +180,13 @@ class RobertaSelfOutput(nn.Module):
     def __init__(self, config: RobertaConfig):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.train = config.train if hasattr(config, "train") else False
 
-    def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
+    def __call__(self, hidden_states: mx.array,
+                 input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
         # hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
@@ -230,10 +239,12 @@ class RobertaOutput(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
+    def __call__(self, hidden_states: mx.array,
+                 input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
@@ -284,7 +295,8 @@ class RobertaEncoder(nn.Module):
         super().__init__()
         self.train = config.train if hasattr(config, "train") else False
 
-        self.layer = [RobertaLayer(config) for _ in range(config.num_hidden_layers)]
+        self.layer = [RobertaLayer(config)
+                      for _ in range(config.num_hidden_layers)]
         self.gradient_checkpointing = False
 
     def __call__(
@@ -395,8 +407,7 @@ class RobertaModel(nn.Module):
             else self.config.output_hidden_states
         )
         return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
+            return_dict if return_dict is not None else self.config.use_return_dict)
 
         use_cache = False
 
@@ -411,8 +422,7 @@ class RobertaModel(nn.Module):
             if hasattr(self.embeddings, "token_type_ids"):
                 buffered_token_type_ids = self.embeddings.token_type_ids[:, :seq_length]
                 buffered_token_type_ids_expanded = buffered_token_type_ids.expand(
-                    batch_size, seq_length
-                )
+                    batch_size, seq_length)
                 token_type_ids = buffered_token_type_ids_expanded
             else:
                 token_type_ids = mx.zeros(input_shape)
@@ -451,6 +461,229 @@ class RobertaModel(nn.Module):
         )
 
 
+class RobertaClassificationHead(nn.Module):
+    """Head for sentence-level classification tasks."""
+
+    def __init__(self, config):
+        super().__init__()
+        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        classifier_dropout = (
+            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob)
+        self.dropout = nn.Dropout(classifier_dropout)
+        self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
+
+    def __call__(self, features, **kwargs):
+        x = features[:, 0, :]  # take <s> token (equiv. to [CLS])
+        x = self.dropout(x)
+        x = self.dense(x)
+        x = mx.tanh(x)
+        x = self.dropout(x)
+        x = self.out_proj(x)
+        return x
+
+
 class RobertaForSequenceClassification(nn.Module):
     def __init__(self, config):
-        pass
+        super().__init__()
+        self.num_labels = config.num_labels
+        self.config = config
+
+        self.roberta = RobertaModel(config, add_pooling_layer=False)
+        self.classifier = RobertaClassificationHead(config)
+
+    def __call__(
+        self,
+        input_ids: Optional[mx.array] = None,
+        attention_mask: Optional[mx.array] = None,
+        token_type_ids: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        labels: Optional[mx.array] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple[mx.array], SequenceClassifierOutput]:
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.roberta(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        sequence_output = outputs.last_hidden_state
+        logits = self.classifier(sequence_output)
+
+        loss = None
+        if labels is not None:
+            # move labels to correct device to enable model parallelism
+            labels = labels.to(logits.device)
+            if self.config.problem_type is None:
+                if self.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.num_labels > 1 and (labels.dtype == mx.array):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
+
+            if self.config.problem_type == "regression":
+                loss_fct = nn.losses.mse_loss()
+                if self.num_labels == 1:
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = nn.losses.cross_entropy()
+                loss = loss_fct(
+                    logits.view(-1, self.num_labels), labels.view(-1))
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = nn.losses.binary_cross_entropy()
+                loss = loss_fct(logits, labels)
+
+        if not return_dict:
+            output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
+class RobertaForTokenClassification(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.num_labels = config.num_labels
+        self.config = config
+
+        self.roberta = RobertaModel(config, add_pooling_layer=False)
+        classifier_dropout = (
+            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob)
+        self.dropout = nn.Dropout(classifier_dropout)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+    def __call__(
+        self,
+        input_ids: Optional[mx.array] = None,
+        attention_mask: Optional[mx.array] = None,
+        token_type_ids: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        labels: Optional[mx.array] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple[mx.array], TokenClassifierOutput]:
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.roberta(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = outputs.last_hidden_state
+
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output)
+
+        loss = None
+        if labels is not None:
+            # move labels to correct device to enable model parallelism
+            labels = labels.to(logits.device)
+            loss_fct = nn.losses.cross_entropy()
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+
+        if not return_dict:
+            output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+
+        return TokenClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
+class RobertaForQuestionAnswering(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.num_labels = config.num_labels
+        self.config = config
+
+        self.roberta = RobertaModel(config, add_pooling_layer=False)
+        self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
+
+    def __call__(
+        self,
+        input_ids: Optional[mx.array] = None,
+        attention_mask: Optional[mx.array] = None,
+        token_type_ids: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        start_positions: Optional[mx.array] = None,
+        end_positions: Optional[mx.array] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple[mx.array], QuestionAnsweringModelOutput]:
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.roberta(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = outputs.last_hidden_state
+
+        logits = self.qa_outputs(sequence_output)
+        splits = logits.split(2, axis=-1)
+        start_logits, end_logits = splits[0], splits[1]
+        start_logits = start_logits.squeeze(-1)
+        end_logits = end_logits.squeeze(-1)
+
+        total_loss = None
+        if start_positions is not None and end_positions is not None:
+            # If we are on multi-GPU, split add a dimension
+            if len(start_positions.size()) > 1:
+                start_positions = start_positions.squeeze(-1)
+            if len(end_positions.size()) > 1:
+                end_positions = end_positions.squeeze(-1)
+            # sometimes the start/end positions are outside our model inputs,
+            # we ignore these terms
+            ignored_index = start_logits.size(1)
+            start_positions = start_positions.clamp(0, ignored_index)
+            end_positions = end_positions.clamp(0, ignored_index)
+
+            loss_fct = nn.losses.cross_entropy()
+            start_loss = loss_fct(start_logits, start_positions)
+            end_loss = loss_fct(end_logits, end_positions)
+            total_loss = (start_loss + end_loss) / 2
+
+        if not return_dict:
+            output = (start_logits, end_logits) + outputs[2:]
+            return ((total_loss,) +
+                    output) if total_loss is not None else output
+
+        return QuestionAnsweringModelOutput(
+            loss=total_loss,
+            start_logits=start_logits,
+            end_logits=end_logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )

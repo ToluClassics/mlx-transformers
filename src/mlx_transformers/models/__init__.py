@@ -1,4 +1,14 @@
-from .bert import BertForSequenceClassification, BertModel
+from .bert import (
+    BertModel,
+    BertForSequenceClassification,
+    BertForTokenClassification,
+    BertForQuestionAnswering
+)
 from .llama import LlamaForCausalLM, LlamaModel
-from .roberta import RobertaModel
+from .roberta import (
+    RobertaModel,
+    RobertaForSequenceClassification,
+    RobertaForTokenClassification,
+    RobertaForQuestionAnswering
+) 
 from .xlm_roberta import XLMRobertaModel

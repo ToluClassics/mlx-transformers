@@ -27,6 +27,13 @@ class BaseModelOutputWithPoolingAndCrossAttentions:
 
 
 @dataclass
+class SequenceClassifierOutput:
+    loss: Optional[mx.array] = None
+    logits: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+ 
+@dataclass
 class SequenceClassifierOutputWithPast:
     loss: Optional[mx.array] = None
     logits: mx.array = None
@@ -47,7 +54,6 @@ class Seq2SeqSequenceClassifierOutput:
     encoder_hidden_states: Optional[Tuple[mx.array, ...]] = None
     encoder_attentions: Optional[Tuple[mx.array, ...]] = None
 
-
 @dataclass
 class TokenClassifierOutput:
     loss: Optional[mx.array] = None
@@ -57,9 +63,10 @@ class TokenClassifierOutput:
 
 
 @dataclass
-class SequenceClassifierOutput:
+class QuestionAnsweringModelOutput:
     loss: Optional[mx.array] = None
-    logits: mx.array = None
+    start_logits: mx.array = None
+    end_logits: mx.array = None
     hidden_states: Optional[Tuple[mx.array, ...]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None
 
