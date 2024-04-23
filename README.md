@@ -92,6 +92,12 @@ The `examples` directory contains a few examples that demonstrate how to use the
     Output:==> ['Ẹ jẹ́ ká tú àwọn ẹsẹ Bíbélì sí èdè Yoruba']
     ```
 
+3. [Phi Generation Example](examples/phi_generation.py)
+    ```bash
+    python3 examples/phi_generation.py
+    ```
+    ![Phi Generation](docs/phi.gif)
+
 
 ## Benchmarks
 
