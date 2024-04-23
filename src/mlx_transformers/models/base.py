@@ -28,6 +28,7 @@ class MlxPretrainedMixin:
         float16: bool = False,
         huggingface_model_architecture: Optional[Callable] = None,
     ):
+
         if huggingface_model_architecture:
             architecture = huggingface_model_architecture
         elif hasattr(self.config, "architectures"):
