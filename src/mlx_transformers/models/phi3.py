@@ -4,7 +4,7 @@ from typing import Optional
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
-from transformers import PhiConfig
+from transformers import AutoConfig
 
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
@@ -12,7 +12,25 @@ from .modelling_outputs import *
 from .utils import ACT2FN
 
 
-class PhiRotaryEmbedding(nn.Module):
+class Phi3RMSNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
+        """
+        Phi3RMSNorm is equivalent to T5LayerNorm
+        """
+        super().__init__()
+        self.weight = mx.ones((hidden_size,))
+        self.variance_epsilon = eps
+
+    def __call__(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.astype(mx.float32)
+        variance = mx.power(hidden_states, 2)
+        variance = mx.mean(variance, axis=-1, keepdims=True)
+        hidden_states = hidden_states * mx.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.astype(input_dtype)
+
+
+class Phi3RotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000):
         super().__init__()
         self.dim = dim
@@ -41,46 +59,68 @@ class PhiRotaryEmbedding(nn.Module):
         return (self.cos[:seq_len].astype(x.dtype), self.sin[:seq_len].astype(x.dtype))
 
 
-class PhiLinearScalingRotaryEmbedding(PhiRotaryEmbedding):
-    """PhiRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
-
+class _Phi3ScaledRotaryEmbedding(nn.Module):
     def __init__(
-        self, dim, max_position_embeddings=2048, base=10000, scaling_factor=1.0
+        self,
+        dim,
+        short_factor,
+        long_factor,
+        max_position_embeddings=2048,
+        original_max_position_embeddings=2048,
+        base=10000,
     ):
-        self.scaling_factor = scaling_factor
-        super().__init__(dim, max_position_embeddings, base)
+        super().__init__()
 
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
-        self.max_seq_len_cached = seq_len
-        t = mx.arange(self.max_seq_len_cached, dtype=mx.int64).astype(
-            self.inv_freq.dtype
+        self.dim = dim
+        self.short_factor = short_factor
+        self.long_factor = long_factor
+        self.max_position_embeddings = max_position_embeddings
+        self.original_max_position_embeddings = original_max_position_embeddings
+        self.base = base
+
+    def _calc_mscale(self, scale):
+        raise NotImplementedError("`_calc_mscale` should be implemented in subclasses")
+
+    def forward(self, x, seq_len=None):
+        if seq_len is None:
+            seq_len = x.shape[-2]
+        t = mx.arange(seq_len, dtype=mx.float32)
+
+        if seq_len > self.original_max_position_embeddings:
+            t = mx.arange(seq_len, dtype=mx.float32)
+            rescale_factors = mx.array(self.long_factor, dtype=mx.float32)
+        else:
+            t = mx.arange(self.original_max_position_embeddings, dtype=mx.float32)
+            rescale_factors = mx.array(self.short_factor, dtype=mx.float32)
+
+        inv_freq = 1.0 / (
+            rescale_factors
+            * (self.base ** (mx.arange(0, self.dim, 2).float().to(x.device) / self.dim))
         )
-        t = t / self.scaling_factor
 
-        freqs = mx.outer(t, self.inv_freq)
-        self.emb = mx.concatenate([freqs, freqs], axis=-1)
-        self.cos = mx.cos(self.emb)
-        self.sin = mx.sin(self.emb)
+        freqs = mx.outer(t, inv_freq)
+        mscale = self._calc_mscale(
+            self.max_position_embeddings / self.original_max_position_embeddings
+        )
+        emb = mx.concatenate((freqs, freqs), dim=-1)
+
+        return (emb.cos() * mscale).to(x.dtype), (emb.sin() * mscale).to(x.dtype)
 
 
-class PhiDynamicNTKScalingRotaryEmbedding(PhiRotaryEmbedding):
-    def __init__(
-        self, dim, max_position_embeddings=2048, base=10000, scaling_factor=1.0
-    ):
-        self.scaling_factor = scaling_factor
-        super().__init__(dim, max_position_embeddings, base)
+class Phi3SuScaledRotaryEmbedding(_Phi3ScaledRotaryEmbedding):
+    def _calc_mscale(self, scale):
+        if scale <= 1.0:
+            return 1.0
+        return math.sqrt(
+            1 + math.log(scale) / math.log(self.original_max_position_embeddings)
+        )
 
-    def __call__(self, x, position_ids):
-        seq_len = mx.max(position_ids) + 1
-        if seq_len > self.max_position_embeddings:
-            base = self.base * (
-                (self.scaling_factor * seq_len / self.max_position_embeddings)
-                - (self.scaling_factor - 1)
-            ) ** (self.dim / (self.dim - 2))
-            self.inv_freq = 1.0 / (base ** (mx.arange(0, self.dim, 2) / self.dim))
 
-        cos, sin = super().__call__(x, position_ids)
-        return cos, sin
+class Phi3YarnScaledRotaryEmbedding(_Phi3ScaledRotaryEmbedding):
+    def _calc_mscale(self, scale):
+        if scale <= 1.0:
+            return 1.0
+        return 0.1 * math.log(scale) + 1.0
 
 
 def rotate_half(x):
@@ -99,19 +139,26 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
     return q_embed, k_embed
 
 
-class PhiMLP(nn.Module):
+class Phi3MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.gate_up_proj = nn.Linear(
+            config.hidden_size, 2 * config.intermediate_size, bias=False
+        )
+        self.down_proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias=False
+        )
+
         self.activation_fn = ACT2FN[config.hidden_act]
-        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
 
     def __call__(self, hidden_states: mx.array) -> mx.array:
-        hidden_states = self.fc1(hidden_states)
-        hidden_states = self.activation_fn(hidden_states)
-        hidden_states = self.fc2(hidden_states)
-        return hidden_states
+        y = self.gate_up_proj(hidden_states)
+
+        gate, y = mx.split(y, 2, axis=-1)
+        y = y * self.activation_fn(gate)
+
+        return self.down_proj(y)
 
 
 def repeat_kv(hidden_states, n_rep):
@@ -127,10 +174,10 @@ def repeat_kv(hidden_states, n_rep):
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-class PhiAttention(nn.Module):
+class Phi3Attention(nn.Module):
     """Multi-headed attention from 'Attention Is All You Need' paper"""
 
-    def __init__(self, config: PhiConfig, layer_idx: Optional[int] = None):
+    def __init__(self, config: AutoConfig, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -143,7 +190,6 @@ class PhiAttention(nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
-        self.partial_rotary_factor = config.partial_rotary_factor
         self.is_causal = True
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
@@ -152,56 +198,50 @@ class PhiAttention(nn.Module):
                 f" and `num_heads`: {self.num_heads})."
             )
 
-        self.q_proj = nn.Linear(
-            self.hidden_size, self.num_heads * self.head_dim, bias=True
+        op_size = self.num_heads * self.head_dim + 2 * (
+            self.num_key_value_heads * self.head_dim
         )
-        self.k_proj = nn.Linear(
-            self.hidden_size, self.num_key_value_heads * self.head_dim, bias=True
+        self.o_proj = nn.Linear(
+            self.num_heads * self.head_dim, self.hidden_size, bias=False
         )
-        self.v_proj = nn.Linear(
-            self.hidden_size, self.num_key_value_heads * self.head_dim, bias=True
-        )
-        self.dense = nn.Linear(
-            self.num_heads * self.head_dim, self.hidden_size, bias=True
-        )
-        self.qk_layernorm = config.qk_layernorm
-
-        if self.qk_layernorm:
-            self.q_layernorm = nn.LayerNorm(
-                config.hidden_size // self.num_heads, eps=config.layer_norm_eps
-            )
-            self.k_layernorm = nn.LayerNorm(
-                config.hidden_size // self.num_heads, eps=config.layer_norm_eps
-            )
+        self.qkv_proj = nn.Linear(self.hidden_size, op_size, bias=False)
 
         self._init_rope()
 
     def _init_rope(self):
         if self.config.rope_scaling is None:
-            self.rotary_emb = PhiRotaryEmbedding(
-                int(self.partial_rotary_factor * self.head_dim),
+            self.rotary_emb = Phi3RotaryEmbedding(
+                self.head_dim,
                 max_position_embeddings=self.max_position_embeddings,
                 base=self.rope_theta,
             )
         else:
             scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
-            if scaling_type == "linear":
-                self.rotary_emb = PhiLinearScalingRotaryEmbedding(
-                    int(self.partial_rotary_factor * self.head_dim),
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
+            if scaling_type == "su":
+                self.rotary_emb = Phi3SuScaledRotaryEmbedding(
+                    self.head_dim,
+                    self.config.rope_scaling["short_factor"],
+                    self.config.rope_scaling["long_factor"],
+                    max_position_embeddings=self.config.max_position_embeddings,
+                    original_max_position_embeddings=self.config.original_max_position_embeddings,
+                    base=self.config.rope_theta,
                 )
-            elif scaling_type == "dynamic":
-                self.rotary_emb = PhiDynamicNTKScalingRotaryEmbedding(
-                    int(self.partial_rotary_factor * self.head_dim),
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
+            elif scaling_type == "yarn":
+                self.rotary_emb = Phi3YarnScaledRotaryEmbedding(
+                    self.head_dim,
+                    self.config.rope_scaling["short_factor"],
+                    self.config.rope_scaling["long_factor"],
+                    max_position_embeddings=self.config.max_position_embeddings,
+                    original_max_position_embeddings=self.config.original_max_position_embeddings,
+                    base=self.config.rope_theta,
                 )
             else:
                 raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+
+    def _shape(self, tensor: mx.array, seq_len: int, bsz: int):
+        return tensor.reshape(bsz, seq_len, self.num_heads, self.head_dim).transpose(
+            0, 2, 1, 3
+        )
 
     def __call__(
         self,
@@ -215,23 +255,22 @@ class PhiAttention(nn.Module):
 
         bsz, q_len, _ = hidden_states.shape
 
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+        qkv = self.qkv_proj(hidden_states)
+        query_pos = self.num_heads * self.head_dim
+        query_states = qkv[..., :query_pos]
+        key_states = qkv[
+            ..., query_pos : query_pos + self.num_key_value_heads * self.head_dim
+        ]
+        value_states = qkv[..., query_pos + self.num_key_value_heads * self.head_dim :]
 
-        if self.qk_layernorm:
-            query_states = self.q_layernorm(query_states)
-            key_states = self.k_layernorm(key_states)
-
-        # Prepare the queries, keys and values for the attention computation
-        query_states = query_states.reshape(bsz, q_len, self.num_heads, -1).transpose(
-            0, 2, 1, 3
-        )
+        query_states = query_states.reshape(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(0, 2, 1, 3)
         key_states = key_states.reshape(
-            bsz, q_len, self.num_key_value_heads, -1
+            bsz, q_len, self.num_key_value_heads, self.head_dim
         ).transpose(0, 2, 1, 3)
         value_states = value_states.reshape(
-            bsz, q_len, self.num_key_value_heads, -1
+            bsz, q_len, self.num_key_value_heads, self.head_dim
         ).transpose(0, 2, 1, 3)
 
         kv_seq_len = key_states.shape[-2]
@@ -243,36 +282,18 @@ class PhiAttention(nn.Module):
                     "with a layer index."
                 )
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
-
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-        # Partial rotary embedding
-        query_rot, query_pass = (
-            query_states[..., : self.rotary_emb.dim],
-            query_states[..., self.rotary_emb.dim :],
+        query_states, key_states = apply_rotary_pos_emb(
+            query_states, key_states, cos, sin, position_ids
         )
-        key_rot, key_pass = (
-            key_states[..., : self.rotary_emb.dim],
-            key_states[..., self.rotary_emb.dim :],
-        )
-        # [batch_size, seq_length, num_heads, head_dim // config.partial_rotary_factor]
-        query_rot, key_rot = apply_rotary_pos_emb(
-            query_rot, key_rot, cos, sin, position_ids
-        )
-
-        query_states = mx.concatenate([query_rot, query_pass], axis=-1)
-        key_states = mx.concatenate([key_rot, key_pass], axis=-1)
 
         if past_key_value is not None:
-            # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {
-                "sin": sin,
-                "cos": cos,
-                "partial_rotation_size": self.rotary_emb.dim,
-            }
+            cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )
 
+        # repeat k/v heads if n_kv_heads < n_heads
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
@@ -281,19 +302,20 @@ class PhiAttention(nn.Module):
             @ key_states.astype(mx.float32).transpose(0, 1, 3, 2)
         ) / math.sqrt(self.head_dim)
 
-        if attn_weights.shape != (bsz, self.num_heads, q_len, kv_seq_len):
+        if attn_weights.size() != (bsz, self.num_heads, q_len, kv_seq_len):
             raise ValueError(
                 f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
-                f" {attn_weights.shape}"
+                f" {attn_weights.size()}"
             )
 
         if attention_mask is not None:
-            if attention_mask.shape != (bsz, 1, q_len, kv_seq_len):
+            if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
                 raise ValueError(
-                    f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.shape}"
+                    f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
                 )
             attn_weights = attn_weights + attention_mask
 
+        # upcast attention to fp32
         attn_weights = mx.softmax(attn_weights.astype(mx.float32), axis=-1).astype(
             query_states.dtype
         )
@@ -302,8 +324,13 @@ class PhiAttention(nn.Module):
             .transpose(0, 2, 1, 3)
             .reshape(bsz, q_len, self.hidden_size)
         )
+        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
+            raise ValueError(
+                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
+                f" {attn_output.size()}"
+            )
 
-        attn_output = self.dense(attn_output)
+        attn_output = self.o_proj(attn_output)
 
         if not output_attentions:
             attn_weights = None
@@ -311,7 +338,7 @@ class PhiAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-class PhiSdpaAttention(PhiAttention):
+class Phi3SdpaAttention(Phi3Attention):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -328,7 +355,7 @@ class PhiSdpaAttention(PhiAttention):
         if output_attentions:
             # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
             logger.warning_once(
-                "PhiModel is using PhiSdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not "
+                "Phi3Model is using Phi3SdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not "
                 "support `output_attentions=True`. Falling back to the manual attention implementation, but specifying "
                 "the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can "
                 'be removed using the argument `attn_implementation="eager"` when loading the model.'
@@ -343,65 +370,47 @@ class PhiSdpaAttention(PhiAttention):
             )
 
         bsz, q_len, _ = hidden_states.shape
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+        qkv = self.qkv_proj(hidden_states)
+        query_pos = self.num_heads * self.head_dim
+        query_states = qkv[..., :query_pos]
+        key_states = qkv[
+            ..., query_pos : query_pos + self.num_key_value_heads * self.head_dim
+        ]
+        value_states = qkv[..., query_pos + self.num_key_value_heads * self.head_dim :]
 
-        if self.qk_layernorm:
-            query_states = self.q_layernorm(query_states)
-            key_states = self.k_layernorm(key_states)
-
-        query_states = query_states.reshape(bsz, q_len, self.num_heads, -1).transpose(
-            0, 2, 1, 3
-        )
+        query_states = query_states.reshape(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(0, 2, 1, 3)
         key_states = key_states.reshape(
-            bsz, q_len, self.num_key_value_heads, -1
+            bsz, q_len, self.num_key_value_heads, self.head_dim
         ).transpose(0, 2, 1, 3)
         value_states = value_states.reshape(
-            bsz, q_len, self.num_key_value_heads, -1
+            bsz, q_len, self.num_key_value_heads, self.head_dim
         ).transpose(0, 2, 1, 3)
 
         kv_seq_len = key_states.shape[-2]
         if past_key_value is not None:
-            if self.layer_idx is None:
-                raise ValueError(
-                    f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
-                    "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
-                    "with a layer index."
-                )
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
 
-        # Partial rotary embedding
-        query_rot, query_pass = (
-            query_states[..., : self.rotary_emb.dim],
-            query_states[..., self.rotary_emb.dim :],
+        query_states, key_states = apply_rotary_pos_emb(
+            query_states, key_states, cos, sin, position_ids
         )
-        key_rot, key_pass = (
-            key_states[..., : self.rotary_emb.dim],
-            key_states[..., self.rotary_emb.dim :],
-        )
-        # [batch_size, seq_length, num_heads, head_dim // config.partial_rotary_factor]
-        query_rot, key_rot = apply_rotary_pos_emb(
-            query_rot, key_rot, cos, sin, position_ids
-        )
-
-        # [batch_size, seq_length, num_heads, head_dim]
-        query_states = mx.concatenate([query_rot, query_pass], axis=-1)
-        key_states = mx.concatenate([key_rot, key_pass], axis=-1)
 
         if past_key_value is not None:
-            cache_kwargs = {
-                "sin": sin,
-                "cos": cos,
-                "partial_rotation_size": self.rotary_emb.dim,
-            }
+            cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
+
+        if attention_mask is not None:
+            if attention_mask.size() != (bsz, 1, q_len, kv_seq_len):
+                raise ValueError(
+                    f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.size()}"
+                )
 
         attn_output = mx.fast.scaled_dot_product_attention(
             query_states,
@@ -411,32 +420,35 @@ class PhiSdpaAttention(PhiAttention):
             dropout_p=self.attention_dropout if self.training else 0.0,
         )
 
-        attn_output = attn_output.transpose(0, 2, 1, 3).reshape(
-            bsz, q_len, self.hidden_size
-        )
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.view(bsz, q_len, self.hidden_size)
 
-        attn_output = self.dense(attn_output)
+        attn_output = self.o_proj(attn_output)
 
         return attn_output, None, past_key_value
 
 
-PHI_ATTENTION_CLASSES = {
-    "eager": PhiAttention,
-    "sdpa": PhiSdpaAttention,
+PHI3_ATTENTION_CLASSES = {
+    "eager": Phi3Attention,
+    "sdpa": Phi3SdpaAttention,
 }
 
 
-class PhiDecoderLayer(nn.Module):
-    def __init__(self, config: PhiConfig, layer_idx: int):
+class Phi3DecoderLayer(nn.Module):
+    def __init__(self, config: AutoConfig, layer_idx: int):
         super().__init__()
-        self.hidden_size = config.hidden_size
-        self.self_attn = PHI_ATTENTION_CLASSES[config._attn_implementation](
-            config=config, layer_idx=layer_idx
+        self.config = config
+        self.self_attn = PHI3_ATTENTION_CLASSES[config._attn_implementation](
+            config, layer_idx=layer_idx
         )
 
-        self.mlp = PhiMLP(config)
-        self.input_layernorm = nn.LayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
+        self.mlp = Phi3MLP(config)
+        self.input_layernorm = Phi3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+
+        self.resid_attn_dropout = nn.Dropout(config.resid_pdrop)
+        self.resid_mlp_dropout = nn.Dropout(config.resid_pdrop)
+        self.post_attention_layernorm = Phi3RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
         )
 
     def __call__(
@@ -461,9 +473,13 @@ class PhiDecoderLayer(nn.Module):
             use_cache=use_cache,
         )
 
-        feed_forward_hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + attn_outputs
 
-        hidden_states = attn_outputs + feed_forward_hidden_states + residual
+        residual = hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + hidden_states
+
         outputs = (hidden_states,)
 
         if output_attentions:
@@ -475,23 +491,21 @@ class PhiDecoderLayer(nn.Module):
         return outputs
 
 
-class PhiModel(nn.Module):
-    def __init__(self, config: PhiConfig):
+class Phi3Model(nn.Module):
+    def __init__(self, config: AutoConfig):
         super().__init__()
-        self.config = config
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
-
+        self.embed_dropout = nn.Dropout(config.embd_pdrop)
         self.layers = [
-            PhiDecoderLayer(config, layer_idx)
+            Phi3DecoderLayer(config, layer_idx)
             for layer_idx in range(config.num_hidden_layers)
         ]
-        self.final_layernorm = nn.LayerNorm(
-            config.hidden_size, eps=config.layer_norm_eps
-        )
-        self._use_sdpa = config._attn_implementation == "sdpa"
+
+        self._attn_implementation = config._attn_implementation
+        self.norm = Phi3RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -686,12 +700,12 @@ class PhiModel(nn.Module):
         return causal_mask
 
 
-class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
+class Phi3ForCausalLM(nn.Module, MlxPretrainedMixin):
 
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.model = PhiModel(config)
+        self.model = Phi3Model(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=True)
 

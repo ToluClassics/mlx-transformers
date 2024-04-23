@@ -82,7 +82,7 @@ The `examples` directory contains a few examples that demonstrate how to use the
 
 1. [LLama Example](examples/llama_generation.py)
     ```bash
-    python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf" --model-path meta-llama-Llama-2-7b-hf.npz 
+    python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf"  
     ```
 
 2. [NLLB Translation Example](examples/nllb_translation.py)

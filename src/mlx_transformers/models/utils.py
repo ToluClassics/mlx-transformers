@@ -1,11 +1,37 @@
 import importlib
+import math
 from typing import Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
 
-ACT2FN = {"relu": nn.ReLU(), "gelu": nn.GELU(), "silu": nn.SiLU()}
+
+class NewGELUActivation(nn.Module):
+    """
+    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT). Also see
+    the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
+    """
+
+    def __call__(self, input: mx.array) -> mx.array:
+        return (
+            0.5
+            * input
+            * (
+                1.0
+                + mx.tanh(
+                    math.sqrt(2.0 / math.pi) * (input + 0.044715 * mx.power(input, 3.0))
+                )
+            )
+        )
+
+
+ACT2FN = {
+    "relu": nn.ReLU(),
+    "gelu": nn.GELU(),
+    "silu": nn.SiLU(),
+    "gelu_new": NewGELUActivation(),
+}
 
 
 def get_extended_attention_mask(

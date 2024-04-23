@@ -23,7 +23,7 @@ def toc(msg, start):
 
 
 def load_model(
-    model_name: str, model_weights: str, hgf_model_class, mlx_model_class
+    model_name: str, mlx_model_class
 ) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
     """
     Load a llama model and tokenizer from the given model name and weights.
@@ -41,7 +41,7 @@ def load_model(
     current_directory = os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
-    model.load_weights(model_weights, strict=False)
+    model.from_pretrained(model_name)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -92,11 +92,6 @@ if __name__ == "__main__":
         default="meta-llama/Llama-2-7b-hf",
     )
     parser.add_argument(
-        "--model-path",
-        help="Path to the model weights",
-        default="mlx_model",
-    )
-    parser.add_argument(
         "--prompt",
         help="The message to be processed by the model. Ignored when --few-shot is provided.",
         default="In the beginning the Universe was created.",
@@ -115,9 +110,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     mx.random.seed(args.seed)
+    mx.set_default_device(mx.gpu)
 
-    model, tokenizer = load_model(
-        args.model_name, args.model_path, LlamaForCausalLM, MlxLlamaForCausalLM
-    )
+    model, tokenizer = load_model(args.model_name, MlxLlamaForCausalLM)
 
     generate(model, tokenizer, args)
