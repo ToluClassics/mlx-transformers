@@ -11,6 +11,8 @@ import torch
 from transformers import M2M100Config
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
 
+from .base import MlxPretrainedMixin
+
 
 def _prepare_4d_attention_mask(mask: mx.array, tgt_len: Optional[int] = None):
     """Create 4d attention mask from a 2d mask."""
@@ -417,6 +419,7 @@ class M2M100Decoder(nn.Module):
 
         # create causal mask
         # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        # TODO: Fix this
         combined_attention_mask = _prepare_4d_causal_attention_mask(
             torch.tensor(np.array(attention_mask)),
             input_shape,
@@ -480,7 +483,7 @@ class M2M100Model(nn.Module):
         return decoder_hidden_states
 
 
-class M2M100ForConditionalGeneration(nn.Module):
+class M2M100ForConditionalGeneration(nn.Module, MlxPretrainedMixin):
     def __init__(self, config: M2M100Config):
         super().__init__()
 
