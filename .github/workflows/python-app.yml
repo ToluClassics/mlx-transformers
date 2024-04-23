@@ -23,7 +23,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install flake8 pytest PyYAML pre-commit  # Added pre-commit here
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       # Run pre-commit hooks
       - name: Run pre-commit hooks
         run: pre-commit run --all-files

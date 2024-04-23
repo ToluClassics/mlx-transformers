@@ -30,6 +30,7 @@ A list of the available models can be found in the `mlx_transformers.models` mod
 
     tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     config = BertConfig.from_pretrained("bert-base-uncased")
+    
     model = MLXBertForMaskedLM(config)
     model.from_pretrained("bert-base-uncased")
 
