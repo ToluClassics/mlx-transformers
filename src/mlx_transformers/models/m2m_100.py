@@ -1,8 +1,7 @@
 # Copyright © 2023 Apple Inc.
 
 import math
-import os
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -114,7 +113,6 @@ class M2M100Attention(nn.Module):
         is_causal: bool = False,
         args: M2M100Config = None,
     ):
-
         super().__init__()
         self.args = args
 
@@ -146,7 +144,6 @@ class M2M100Attention(nn.Module):
         attention_mask: Optional[mx.array] = None,
         layer_head_mask: Optional[mx.array] = None,
     ):
-
         is_cross_attention = key_value_states is not None
 
         bsz, tgt_len, _ = hidden_states.shape
@@ -186,14 +183,15 @@ class M2M100Attention(nn.Module):
 
         if attn_weights.shape != (bsz * self.num_heads, tgt_len, src_len):
             raise ValueError(
-                f"Attention weights should be of size {(bsz * self.num_heads, tgt_len, src_len)}, but is"
-                f" {attn_weights.shape}"
+                f"Weights should be of size {(bsz * self.num_heads, tgt_len, src_len)}"
+                f", but is {attn_weights.shape}"
             )
 
         if attention_mask is not None:
             if attention_mask.shape != (bsz, 1, tgt_len, src_len):
                 raise ValueError(
-                    f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, but is {attention_mask.shape}"
+                    f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, "
+                    "but is {attention_mask.shape}"
                 )
 
             attn_weights = (
@@ -357,7 +355,6 @@ class M2M100Encoder(nn.Module):
         self.layer_norm = nn.LayerNorm(embed_dim)
 
     def __call__(self, input_ids: mx.array, attention_mask: mx.array):
-
         input_shape = input_ids.shape
         input_ids = input_ids.reshape(-1, input_shape[-1])
 
@@ -407,7 +404,6 @@ class M2M100Decoder(nn.Module):
         encoder_attention_mask: mx.array,
         past_key_values: mx.array,
     ):
-
         input_shape = input_ids.shape
         input_ids = input_ids.reshape(-1, input_shape[-1])
 
@@ -470,7 +466,6 @@ class M2M100Model(nn.Module):
         decoder_attention_mask: mx.array,
         past_key_values: mx.array,
     ):
-
         encoder_hidden_states = self.encoder(input_ids, attention_mask)
         decoder_hidden_states = self.decoder(
             decoder_input_ids,

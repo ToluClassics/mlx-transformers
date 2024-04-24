@@ -1,11 +1,12 @@
 import argparse
+import os
 import time
 from typing import Tuple
 
 import mlx.core as mx
-from transformers import AutoTokenizer, LlamaConfig
+from transformers import AutoTokenizer, PhiConfig
 
-from mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
+from mlx_transformers.models import PhiForCausalLM as MlxPhiForCausalLM
 
 
 def tic():
@@ -21,7 +22,7 @@ def toc(msg, start):
 
 def load_model(
     model_name: str, mlx_model_class
-) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
+) -> Tuple[MlxPhiForCausalLM, AutoTokenizer]:
     """
     Load a llama model and tokenizer from the given model name and weights.
 
@@ -34,7 +35,8 @@ def load_model(
     Returns:
         _type_: _description_
     """
-    config = LlamaConfig.from_pretrained(model_name)
+    config = PhiConfig.from_pretrained(model_name)
+    os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
     model.from_pretrained(model_name)
@@ -44,7 +46,7 @@ def load_model(
     return model, tokenizer
 
 
-def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
+def generate(model: MlxPhiForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
     inputs = tokenizer(args.prompt, return_tensors="np", truncation=True)
 
@@ -85,7 +87,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-name",
         help="The model name to load",
-        default="meta-llama/Llama-2-7b-hf",
+        default="microsoft/phi-2",
     )
     parser.add_argument(
         "--prompt",
@@ -108,6 +110,6 @@ if __name__ == "__main__":
     mx.random.seed(args.seed)
     mx.set_default_device(mx.gpu)
 
-    model, tokenizer = load_model(args.model_name, MlxLlamaForCausalLM)
+    model, tokenizer = load_model(args.model_name, MlxPhiForCausalLM)
 
     generate(model, tokenizer, args)

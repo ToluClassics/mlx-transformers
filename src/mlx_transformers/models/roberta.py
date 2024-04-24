@@ -9,7 +9,13 @@ import mlx.nn as nn
 from transformers import RobertaConfig
 
 from .base import MlxPretrainedMixin
-from .modelling_outputs import *
+from .modelling_outputs import (
+    BaseModelOutputWithPastAndCrossAttentions,
+    BaseModelOutputWithPoolingAndCrossAttentions,
+    SequenceClassifierOutput,
+    TokenClassifierOutput,
+    QuestionAnsweringModelOutput,
+)
 from .utils import ACT2FN, get_extended_attention_mask
 
 logger = logging.getLogger(__name__)
@@ -52,7 +58,6 @@ class RobertaEmbeddings(nn.Module):
         token_type_ids: mx.array = None,
         inputs_embeds: mx.array = None,
     ) -> mx.array:
-
         if position_ids is None:
             if input_ids is not None:
                 position_ids = create_position_ids_from_input_ids(
@@ -68,7 +73,7 @@ class RobertaEmbeddings(nn.Module):
         else:
             input_shape = inputs_embeds.shape[:-1]
 
-        seq_length = input_shape[1]
+        input_shape[1]
 
         if token_type_ids is None:
             token_type_ids = mx.zeros(input_shape, dtype="int32")
@@ -87,7 +92,6 @@ class RobertaEmbeddings(nn.Module):
         return self.LayerNorm(embeddings)
 
     def create_position_ids_from_inputs_embeds(self, inputs_embeds: mx.array):
-
         input_shape = inputs_embeds.shape[:-1]
         seq_length = input_shape[1]
 
@@ -201,7 +205,6 @@ class RobertaAttention(nn.Module):
         attention_mask: Optional[mx.array] = None,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mx.array]:
-
         self_outputs = self.self(
             hidden_states,
             attention_mask,
@@ -262,7 +265,6 @@ class RobertaLayer(nn.Module):
         past_key_value: Optional[Tuple[Tuple[mx.array]]] = None,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mx.array]:
-
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
@@ -302,7 +304,6 @@ class RobertaEncoder(nn.Module):
         all_self_attentions = () if output_attentions else None
 
         for i, layer_module in enumerate(self.layer):
-
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
@@ -358,7 +359,6 @@ class RobertaPooler(nn.Module):
 
 
 class RobertaModel(nn.Module, MlxPretrainedMixin):
-
     def __init__(self, config, add_pooling_layer=True):
         super().__init__()
 
@@ -386,7 +386,6 @@ class RobertaModel(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[List], BaseModelOutputWithPoolingAndCrossAttentions]:
-
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -400,8 +399,6 @@ class RobertaModel(nn.Module, MlxPretrainedMixin):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
-
-        use_cache = False
 
         input_shape = input_ids.shape
 
@@ -498,7 +495,6 @@ class RobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], SequenceClassifierOutput]:
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
@@ -580,7 +576,6 @@ class RobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], TokenClassifierOutput]:
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
@@ -640,7 +635,6 @@ class RobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], QuestionAnsweringModelOutput]:
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )

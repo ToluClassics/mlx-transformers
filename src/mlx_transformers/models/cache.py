@@ -51,7 +51,8 @@ class Cache:
     @property
     def seen_tokens(self):
         logger.warning_once(
-            "The `seen_tokens` attribute is deprecated and will be removed in v4.41. Use the `cache_position` "
+            "The `seen_tokens` attribute is deprecated and will be removed in v4.41."
+            "Use the `cache_position` "
             "model input instead."
         )
         if hasattr(self, "_seen_tokens"):
@@ -62,9 +63,11 @@ class Cache:
 
 class DynamicCache(Cache):
     """
-    A cache that grows dynamically as more tokens are generated. This is the default for generative models.
+    A cache that grows dynamically as more tokens are generated.
+    This is the default for generative models.
 
-    It stores the Key and Value states as a list of tensors, one for each layer. The expected shape for each tensor is
+    It stores the Key and Value states as a list of tensors, one for each layer.
+    The expected shape for each tensor is
     `[batch_size, num_heads, seq_len, head_dim]`.
     """
 
@@ -77,7 +80,8 @@ class DynamicCache(Cache):
 
     def __getitem__(self, layer_idx: int) -> List[Tuple[mx.array]]:
         """
-        Support for backwards-compatible `past_key_value` indexing, e.g. `past_key_value[0][0].shape[2]` to get the
+        Support for backwards-compatible `past_key_value` indexing, e.g.
+        `past_key_value[0][0].shape[2]` to get the
         sequence length.
         """
         if layer_idx < len(self):
@@ -89,7 +93,8 @@ class DynamicCache(Cache):
 
     def __iter__(self):
         """
-        Support for backwards-compatible `past_key_value` iteration, e.g. `for x in past_key_value:` to iterate over
+        Support for backwards-compatible `past_key_value` iteration, e.g.
+        `for x in past_key_value:` to iterate over
         keys and values
         """
         for layer_idx in range(len(self)):
@@ -97,7 +102,8 @@ class DynamicCache(Cache):
 
     def __len__(self):
         """
-        Support for backwards-compatible `past_key_value` length, e.g. `len(past_key_value)`. This value corresponds
+        Support for backwards-compatible `past_key_value` length, e.g.
+         `len(past_key_value)`. This value corresponds
         to the number of layers in the model.
         """
         return len(self.key_cache)
@@ -140,17 +146,25 @@ class DynamicCache(Cache):
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
     def get_seq_length(self, layer_idx: Optional[int] = 0) -> int:
-        """Returns the sequence length of the cached states. A layer index can be optionally passed."""
+        """
+        Returns the sequence length of the cached states.
+        A layer index can be optionally passed.
+        """
         if len(self.key_cache) <= layer_idx:
             return 0
         return self.key_cache[layer_idx].shape[-2]
 
     def get_max_length(self) -> Optional[int]:
-        """Returns the maximum sequence length of the cached states. DynamicCache does not have a maximum length."""
+        """
+        Returns the maximum sequence length of the cached states.
+        DynamicCache does not have a maximum length.
+        """
         return None
 
     def to_legacy_cache(self) -> Tuple[Tuple[mx.array], Tuple[mx.array]]:
-        """Converts the `DynamicCache` instance into the its equivalent in the legacy cache format."""
+        """
+        Converts the `DynamicCache` instance into the its equivalent in the legacy cache format.
+        """
         legacy_cache = ()
         for layer_idx in range(len(self)):
             legacy_cache += ((self.key_cache[layer_idx], self.value_cache[layer_idx]),)

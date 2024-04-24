@@ -1,7 +1,8 @@
 import setuptools
-from setuptools import find_packages, setup
+from setuptools import find_packages
 
-description = "MLX transformers is a machine learning framework with similar Interface to Huggingface transformers using MLX core as backend."
+description = "MLX transformers is a machine learning framework with similar Interface \
+    to Huggingface transformers."
 
 with open("requirements.txt") as f:
     requirements = f.read().splitlines()

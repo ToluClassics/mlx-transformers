@@ -15,6 +15,15 @@ This library is available on PyPI and can be installed using pip:
 pip install mlx-transformers
 ```
 
+It is also recommended to install [`asitop`](https://github.com/tlkh/asitop)
+which can be super useful for monitoring the GPU and CPU usage on Apple Silicon devices.
+
+## Models Supported
+
+- Phi Family of Models (Phi3, Phi2, Phi)
+- LLama
+- Machine Translation Models (NLLB, M2M-100)
+- Encoder Models (Bert, RoBERTa, XLMRoberta, Sentence Transformers)
 
 ## Quick Tour
 
@@ -76,13 +85,13 @@ sentence_embeddings = _mean_pooling(outputs.last_hidden_state, inputs.attention_
 ```
 
 
-## Examples
+## Other Examples
 
 The `examples` directory contains a few examples that demonstrate how to use the models in MLX Transformers. 
 
 1. [LLama Example](examples/llama_generation.py)
     ```bash
-    python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf" --model-path meta-llama-Llama-2-7b-hf.npz 
+    python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf"  
     ```
 
 2. [NLLB Translation Example](examples/nllb_translation.py)
@@ -90,6 +99,11 @@ The `examples` directory contains a few examples that demonstrate how to use the
     python3 examples/nllb_translation.py --model_name facebook/nllb-200-distilled-600M --source_language English --target_language Yoruba --text_to_translate "Let us translate text to Yoruba"
 
     Output:==> ['Ẹ jẹ́ ká tú àwọn ẹsẹ Bíbélì sí èdè Yoruba']
+    ```
+
+3. [Phi Generation Example](examples/phi3_generation.py)
+    ```bash
+    python3 examples/phi3_generation.py --temp 1.0
     ```
 
 

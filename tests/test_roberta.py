@@ -1,5 +1,4 @@
 import os
-import sys
 import unittest
 
 import mlx.core as mx
@@ -10,6 +9,8 @@ from transformers import (
     RobertaForQuestionAnswering,
     RobertaForSequenceClassification,
     RobertaForTokenClassification,
+    RobertaForQuestionAnswering,
+    AutoTokenizer,
     RobertaModel,
     RobertaTokenizer,
 )
@@ -51,7 +52,6 @@ def load_hgf_model(model_name: str, hgf_model_class):
 
 
 class TestMlxRoberta(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "FacebookAI/roberta-base"
@@ -90,7 +90,6 @@ class TestMlxRoberta(unittest.TestCase):
 
 
 class TestMlxRobertaForSequenceClassification(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "cardiffnlp/twitter-roberta-base-emotion"
@@ -134,7 +133,6 @@ class TestMlxRobertaForSequenceClassification(unittest.TestCase):
 
 
 class TestMlxRobertaForTokenClassification(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "Jean-Baptiste/roberta-large-ner-english"
@@ -196,7 +194,6 @@ class TestMlxRobertaForTokenClassification(unittest.TestCase):
 
 
 class TestMlxRobertaForQuestionAnswering(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "deepset/roberta-base-squad2"

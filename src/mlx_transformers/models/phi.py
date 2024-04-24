@@ -1,91 +1,79 @@
 import math
-from typing import Optional, Dict
+import logging
+from typing import Optional, Tuple, Dict
 
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
-from transformers import LlamaConfig
+from transformers import PhiConfig
 
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
-from .modelling_outputs import (
-    BaseModelOutputWithPast,
-    CausalLMOutputWithPast,
-)
+from .modelling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from .utils import ACT2FN
 
+logger = logging.getLogger(__name__)
 
-class LlamaRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
-        """
-        LlamaRMSNorm is equivalent to T5LayerNorm
-        """
+
+class PhiRotaryEmbedding(nn.Module):
+    def __init__(self, dim, max_position_embeddings=2048, base=10000):
         super().__init__()
-        self.weight = mx.ones((hidden_size,))
-        self.variance_epsilon = eps
-
-    def __call__(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.astype(mx.float32)
-        variance = mx.power(hidden_states, 2)
-        variance = mx.mean(variance, axis=-1, keepdims=True)
-        hidden_states = hidden_states * mx.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.astype(input_dtype)
-
-
-class LlamaRotaryEmbedding(nn.Module):
-    def __init__(
-        self,
-        dim,
-        max_position_embeddings=2048,
-        base=10000,
-        device=None,
-        scaling_factor=1.0,
-    ):
-        super().__init__()
-        self.scaling_factor = scaling_factor
         self.dim = dim
         self.max_position_embeddings = max_position_embeddings
         self.base = base
 
-        self.inv_freq = 1.0 / (
-            self.base ** (mx.arange(0, self.dim, 2, dtype=mx.int64) / self.dim)
-        )
-        self.max_seq_len_cached = max_position_embeddings
+        self.inv_freq = 1.0 / (base ** (mx.arange(0, dim, 2) / dim))
 
-        t = mx.arange(self.max_seq_len_cached).astype(mx.int64)
-        t = t / self.scaling_factor
+        self._set_cos_sin_cache(max_position_embeddings, mx.float32)
+
+    def _set_cos_sin_cache(self, seq_len, dtype):
+        self.max_seq_len_cached = seq_len
+        t = mx.arange(self.max_seq_len_cached, dtype=mx.int64).astype(
+            self.inv_freq.dtype
+        )
+
         freqs = mx.outer(t, self.inv_freq)
+        self.emb = mx.concatenate([freqs, freqs], axis=-1)
+        self.cos = mx.cos(self.emb)
+        self.sin = mx.sin(self.emb)
 
-        mx.concatenate([freqs, freqs], axis=-1)
+    def __call__(self, x, seq_len=None):
+        if seq_len > self.max_seq_len_cached:
+            self._set_cos_sin_cache(seq_len=seq_len, dtype=x.dtype)
 
-    def __call__(self, x, position_ids):
-        inv_freq_expanded = self.inv_freq[None, :, None].astype(mx.float32)
-        inv_freq_expanded = mx.broadcast_to(
-            inv_freq_expanded, (position_ids.shape[0], inv_freq_expanded.shape[1], 1)
+        return (self.cos[:seq_len].astype(x.dtype), self.sin[:seq_len].astype(x.dtype))
+
+
+class PhiLinearScalingRotaryEmbedding(PhiRotaryEmbedding):
+    """PhiRotaryEmbedding extended with linear scaling. Credits to the Reddit user /u/kaiokendev"""
+
+    def __init__(
+        self, dim, max_position_embeddings=2048, base=10000, scaling_factor=1.0
+    ):
+        self.scaling_factor = scaling_factor
+        super().__init__(dim, max_position_embeddings, base)
+
+    def _set_cos_sin_cache(self, seq_len, device, dtype):
+        self.max_seq_len_cached = seq_len
+        t = mx.arange(self.max_seq_len_cached, dtype=mx.int64).astype(
+            self.inv_freq.dtype
         )
+        t = t / self.scaling_factor
 
-        position_ids_expanded = position_ids[:, None, :].astype(mx.float32)
-
-        x_dtype = x.dtype
-
-        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(0, 2, 1)
-        emb = mx.concatenate([freqs, freqs], axis=-1)
-        cos = mx.cos(emb)
-        sin = mx.sin(emb)
-
-        return cos.astype(x_dtype), sin.astype(x_dtype)
+        freqs = mx.outer(t, self.inv_freq)
+        self.emb = mx.concatenate([freqs, freqs], axis=-1)
+        self.cos = mx.cos(self.emb)
+        self.sin = mx.sin(self.emb)
 
 
-class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
+class PhiDynamicNTKScalingRotaryEmbedding(PhiRotaryEmbedding):
+    def __init__(
+        self, dim, max_position_embeddings=2048, base=10000, scaling_factor=1.0
+    ):
+        self.scaling_factor = scaling_factor
+        super().__init__(dim, max_position_embeddings, base)
+
     def __call__(self, x, position_ids):
-        position_ids = position_ids / self.scaling_factor
-        cos, sin = super().__call__(x, position_ids)
-        return cos, sin
-
-
-class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
-    def forward(self, x, position_ids):
         seq_len = mx.max(position_ids) + 1
         if seq_len > self.max_position_embeddings:
             base = self.base * (
@@ -106,28 +94,27 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb(q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
-    cos = mx.expand_dims(cos, axis=unsqueeze_dim)
-    sin = mx.expand_dims(sin, axis=unsqueeze_dim)
+    cos = mx.expand_dims(cos[position_ids], axis=unsqueeze_dim)
+    sin = mx.expand_dims(sin[position_ids], axis=unsqueeze_dim)
 
-    q_embed = q * cos + rotate_half(q) * sin
-    k_embed = k * cos + rotate_half(k) * sin
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
 
-class LlamaMLP(nn.Module):
+class PhiMLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.hidden_size = config.hidden_size
-        self.intermediate_size = config.intermediate_size
-        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
-        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=False)
-        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=False)
-        self.act_fn = ACT2FN[config.hidden_act]
+        self.activation_fn = ACT2FN[config.hidden_act]
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
 
-    def __call__(self, x):
-        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        return down_proj
+    def __call__(self, hidden_states: mx.array) -> mx.array:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states
 
 
 def repeat_kv(hidden_states, n_rep):
@@ -142,8 +129,10 @@ def repeat_kv(hidden_states, n_rep):
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
-class LlamaAttention(nn.Module):
-    def __init__(self, config: LlamaConfig, layer_idx: Optional[int] = None):
+class PhiAttention(nn.Module):
+    """Multi-headed attention from 'Attention Is All You Need' paper"""
+
+    def __init__(self, config: PhiConfig, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -156,6 +145,7 @@ class LlamaAttention(nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
+        self.partial_rotary_factor = config.partial_rotary_factor
         self.is_causal = True
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
@@ -165,27 +155,33 @@ class LlamaAttention(nn.Module):
             )
 
         self.q_proj = nn.Linear(
-            self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias
+            self.hidden_size, self.num_heads * self.head_dim, bias=True
         )
         self.k_proj = nn.Linear(
-            self.hidden_size,
-            self.num_key_value_heads * self.head_dim,
-            bias=config.attention_bias,
+            self.hidden_size, self.num_key_value_heads * self.head_dim, bias=True
         )
         self.v_proj = nn.Linear(
-            self.hidden_size,
-            self.num_key_value_heads * self.head_dim,
-            bias=config.attention_bias,
+            self.hidden_size, self.num_key_value_heads * self.head_dim, bias=True
         )
-        self.o_proj = nn.Linear(
-            self.hidden_size, self.hidden_size, bias=config.attention_bias
+        self.dense = nn.Linear(
+            self.num_heads * self.head_dim, self.hidden_size, bias=True
         )
+        self.qk_layernorm = config.qk_layernorm
+
+        if self.qk_layernorm:
+            self.q_layernorm = nn.LayerNorm(
+                config.hidden_size // self.num_heads, eps=config.layer_norm_eps
+            )
+            self.k_layernorm = nn.LayerNorm(
+                config.hidden_size // self.num_heads, eps=config.layer_norm_eps
+            )
+
         self._init_rope()
 
     def _init_rope(self):
         if self.config.rope_scaling is None:
-            self.rotary_emb = LlamaRotaryEmbedding(
-                self.head_dim,
+            self.rotary_emb = PhiRotaryEmbedding(
+                int(self.partial_rotary_factor * self.head_dim),
                 max_position_embeddings=self.max_position_embeddings,
                 base=self.rope_theta,
             )
@@ -193,15 +189,15 @@ class LlamaAttention(nn.Module):
             scaling_type = self.config.rope_scaling["type"]
             scaling_factor = self.config.rope_scaling["factor"]
             if scaling_type == "linear":
-                self.rotary_emb = LlamaLinearScalingRotaryEmbedding(
-                    self.head_dim,
+                self.rotary_emb = PhiLinearScalingRotaryEmbedding(
+                    int(self.partial_rotary_factor * self.head_dim),
                     max_position_embeddings=self.max_position_embeddings,
                     scaling_factor=scaling_factor,
                     base=self.rope_theta,
                 )
             elif scaling_type == "dynamic":
-                self.rotary_emb = LlamaDynamicNTKScalingRotaryEmbedding(
-                    self.head_dim,
+                self.rotary_emb = PhiDynamicNTKScalingRotaryEmbedding(
+                    int(self.partial_rotary_factor * self.head_dim),
                     max_position_embeddings=self.max_position_embeddings,
                     scaling_factor=scaling_factor,
                     base=self.rope_theta,
@@ -217,13 +213,16 @@ class LlamaAttention(nn.Module):
         past_key_value=None,
         output_attentions=False,
         use_cache=False,
-        cache_position=None,
     ):
         bsz, q_len, _ = hidden_states.shape
 
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
+
+        if self.qk_layernorm:
+            query_states = self.q_layernorm(query_states)
+            key_states = self.k_layernorm(key_states)
 
         # Prepare the queries, keys and values for the attention computation
         query_states = query_states.reshape(bsz, q_len, self.num_heads, -1).transpose(
@@ -236,37 +235,77 @@ class LlamaAttention(nn.Module):
             bsz, q_len, self.num_key_value_heads, -1
         ).transpose(0, 2, 1, 3)
 
-        cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(
-            query_states, key_states, cos, sin
+        kv_seq_len = key_states.shape[-2]
+        if past_key_value is not None:
+            if self.layer_idx is None:
+                raise ValueError(
+                    f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
+                    "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
+                    "with a layer index."
+                )
+            kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
+
+        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+        # Partial rotary embedding
+        query_rot, query_pass = (
+            query_states[..., : self.rotary_emb.dim],
+            query_states[..., self.rotary_emb.dim :],
         )
+        key_rot, key_pass = (
+            key_states[..., : self.rotary_emb.dim],
+            key_states[..., self.rotary_emb.dim :],
+        )
+        # [batch_size, seq_length, num_heads, head_dim // config.partial_rotary_factor]
+        query_rot, key_rot = apply_rotary_pos_emb(
+            query_rot, key_rot, cos, sin, position_ids
+        )
+
+        query_states = mx.concatenate([query_rot, query_pass], axis=-1)
+        key_states = mx.concatenate([key_rot, key_pass], axis=-1)
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(
-                key_states, value_states, self.layer_idx, cache_kwargs
-            )
+            _cache_kwargs = {
+                "sin": sin,
+                "cos": cos,
+                "partial_rotation_size": self.rotary_emb.dim,
+            }
+            # Todo: fix
+            # key_states, value_states = past_key_value.update(
+            #     key_states, value_states, self.layer_idx, cache_kwargs
+            # )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        attn_weights = (query_states @ key_states.transpose(0, 1, 3, 2)) / math.sqrt(
-            self.head_dim
-        )
+        attn_weights = (
+            query_states.astype(mx.float32)
+            @ key_states.astype(mx.float32).transpose(0, 1, 3, 2)
+        ) / math.sqrt(self.head_dim)
 
-        if attention_mask is not None:  # no matter the length, we just slice it
-            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-            attn_weights = attn_weights + causal_mask
+        if attn_weights.shape != (bsz, self.num_heads, q_len, kv_seq_len):
+            raise ValueError(
+                f"Attention weights should be of size {(bsz, self.num_heads, q_len, kv_seq_len)}, but is"
+                f" {attn_weights.shape}"
+            )
+
+        if attention_mask is not None:
+            if attention_mask.shape != (bsz, 1, q_len, kv_seq_len):
+                raise ValueError(
+                    f"Attention mask should be of size {(bsz, 1, q_len, kv_seq_len)}, but is {attention_mask.shape}"
+                )
+            attn_weights = attn_weights + attention_mask
 
         attn_weights = mx.softmax(attn_weights.astype(mx.float32), axis=-1).astype(
             query_states.dtype
         )
         attn_output = (
-            (attn_weights @ value_states).transpose(0, 2, 1, 3).reshape(bsz, q_len, -1)
+            (attn_weights @ value_states)
+            .transpose(0, 2, 1, 3)
+            .reshape(bsz, q_len, self.hidden_size)
         )
 
-        attn_output = self.o_proj(attn_output)
+        attn_output = self.dense(attn_output)
 
         if not output_attentions:
             attn_weights = None
@@ -274,23 +313,19 @@ class LlamaAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-class LlamaSdpaAttention(LlamaAttention):
-    """
-    Llama attention module using torch.nn.functional.scaled_dot_product_attention. This module inherits from
-    `LlamaAttention` as the weights of the module stays untouched. The only changes are on the forward pass to adapt to
-    SDPA API.
-    """
+class PhiSdpaAttention(PhiAttention):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
     def __call__(
         self,
-        hidden_states,
-        attention_mask=None,
-        position_ids=None,
-        past_key_value=None,
-        output_attentions=False,
-        use_cache=False,
-        cache_position=None,
-    ):
+        hidden_states: mx.array,
+        attention_mask: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
+        past_key_value: Optional[Cache] = None,
+        output_attentions: bool = False,
+        use_cache: bool = False,
+    ) -> Tuple[mx.array, Optional[mx.array], Optional[Tuple[mx.array]]]:
         if output_attentions:
             return super().__call__(
                 hidden_states=hidden_states,
@@ -299,13 +334,16 @@ class LlamaSdpaAttention(LlamaAttention):
                 past_key_value=past_key_value,
                 output_attentions=output_attentions,
                 use_cache=use_cache,
-                cache_position=cache_position,
             )
 
         bsz, q_len, _ = hidden_states.shape
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
+
+        if self.qk_layernorm:
+            query_states = self.q_layernorm(query_states)
+            key_states = self.k_layernorm(key_states)
 
         query_states = query_states.reshape(bsz, q_len, self.num_heads, -1).transpose(
             0, 2, 1, 3
@@ -317,14 +355,41 @@ class LlamaSdpaAttention(LlamaAttention):
             bsz, q_len, self.num_key_value_heads, -1
         ).transpose(0, 2, 1, 3)
 
-        cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(
-            query_states, key_states, cos, sin
+        kv_seq_len = key_states.shape[-2]
+        if past_key_value is not None:
+            if self.layer_idx is None:
+                raise ValueError(
+                    f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
+                    "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
+                    "with a layer index."
+                )
+            kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
+        cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
+
+        # Partial rotary embedding
+        query_rot, query_pass = (
+            query_states[..., : self.rotary_emb.dim],
+            query_states[..., self.rotary_emb.dim :],
+        )
+        key_rot, key_pass = (
+            key_states[..., : self.rotary_emb.dim],
+            key_states[..., self.rotary_emb.dim :],
+        )
+        # [batch_size, seq_length, num_heads, head_dim // config.partial_rotary_factor]
+        query_rot, key_rot = apply_rotary_pos_emb(
+            query_rot, key_rot, cos, sin, position_ids
         )
 
+        # [batch_size, seq_length, num_heads, head_dim]
+        query_states = mx.concatenate([query_rot, query_pass], axis=-1)
+        key_states = mx.concatenate([key_rot, key_pass], axis=-1)
+
         if past_key_value is not None:
-            # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
+            cache_kwargs = {
+                "sin": sin,
+                "cos": cos,
+                "partial_rotation_size": self.rotary_emb.dim,
+            }
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )
@@ -332,44 +397,40 @@ class LlamaSdpaAttention(LlamaAttention):
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        causal_mask = attention_mask
-        if attention_mask is not None:
-            causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
-
         attn_output = mx.fast.scaled_dot_product_attention(
             query_states,
             key_states,
             value_states,
-            scale=self.self.config.rope_scaling["factor"],
-            mask=causal_mask,
+            mask=attention_mask,
+            dropout_p=self.attention_dropout if self.training else 0.0,
         )
 
         attn_output = attn_output.transpose(0, 2, 1, 3).reshape(
             bsz, q_len, self.hidden_size
         )
-        attn_output = self.o_proj(attn_output)
+
+        attn_output = self.dense(attn_output)
 
         return attn_output, None, past_key_value
 
 
-LLAMA_ATTENTION_CLASSES = {
-    "eager": LlamaAttention,
-    "sdpa": LlamaSdpaAttention,
+PHI_ATTENTION_CLASSES = {
+    "eager": PhiAttention,
+    "sdpa": PhiSdpaAttention,
 }
 
 
-class LlamaDecoderLayer(nn.Module):
-    def __init__(self, config: LlamaConfig, layer_idx: int):
+class PhiDecoderLayer(nn.Module):
+    def __init__(self, config: PhiConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
-        self.self_attn = LLAMA_ATTENTION_CLASSES[config._attn_implementation](
+        self.self_attn = PHI_ATTENTION_CLASSES[config._attn_implementation](
             config=config, layer_idx=layer_idx
         )
 
-        self.mlp = LlamaMLP(config)
-        self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = LlamaRMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps
+        self.mlp = PhiMLP(config)
+        self.input_layernorm = nn.LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps
         )
 
     def __call__(
@@ -385,24 +446,18 @@ class LlamaDecoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
+        attn_outputs, self_attn_weights, present_key_value = self.self_attn(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_value=past_key_value,
             output_attentions=output_attentions,
             use_cache=use_cache,
-            cache_position=cache_position,
         )
 
-        hidden_states = residual + hidden_states
+        feed_forward_hidden_states = self.mlp(hidden_states)
 
-        # Fully Connected
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
-
+        hidden_states = attn_outputs + feed_forward_hidden_states + residual
         outputs = (hidden_states,)
 
         if output_attentions:
@@ -414,8 +469,8 @@ class LlamaDecoderLayer(nn.Module):
         return outputs
 
 
-class LlamaModel(nn.Module):
-    def __init__(self, config: LlamaConfig):
+class PhiModel(nn.Module):
+    def __init__(self, config: PhiConfig):
         super().__init__()
         self.config = config
         self.padding_idx = config.pad_token_id
@@ -424,10 +479,13 @@ class LlamaModel(nn.Module):
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
 
         self.layers = [
-            LlamaDecoderLayer(config, layer_idx)
+            PhiDecoderLayer(config, layer_idx)
             for layer_idx in range(config.num_hidden_layers)
         ]
-        self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.final_layernorm = nn.LayerNorm(
+            config.hidden_size, eps=config.layer_norm_eps
+        )
+        self._use_sdpa = config._attn_implementation == "sdpa"
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -463,25 +521,39 @@ class LlamaModel(nn.Module):
             return_dict if return_dict is not None else self.config.use_return_dict
         )
 
+        # retrieve input_ids and inputs_embeds
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError(
+                "You cannot specify both input_ids and inputs_embeds at the same time"
+            )
+        elif input_ids is not None:
+            batch_size, seq_length = input_ids.shape[:2]
+        elif inputs_embeds is not None:
+            batch_size, seq_length = inputs_embeds.shape[:2]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        past_key_values_length = 0
+
+        if use_cache:
+            use_legacy_cache = not isinstance(past_key_values, Cache)
+            if use_legacy_cache:
+                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+            past_key_values_length = past_key_values.get_usable_length(seq_length)
+
+        if position_ids is None:
+            position_ids = mx.arange(
+                past_key_values_length,
+                seq_length + past_key_values_length,
+            )
+            position_ids = mx.expand_dims(position_ids, 0)
+
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
-        past_seen_tokens = 0
-        if use_cache:
-            past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            past_seen_tokens = past_key_values.get_seq_length()
-
-        if cache_position is None:
-            cache_position = mx.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1]
-            )
-
-        if position_ids is None:
-            position_ids = mx.expand_dims(cache_position, axis=0)
-
         # TODO: implement cache
         causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, cache_position, past_seen_tokens
+            attention_mask, inputs_embeds, position_ids, past_key_values_length
         )
 
         hidden_states = inputs_embeds
@@ -512,7 +584,7 @@ class LlamaModel(nn.Module):
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
 
-        hidden_states = self.norm(hidden_states)
+        hidden_states = self.final_layernorm(hidden_states)
 
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
@@ -607,13 +679,13 @@ class LlamaModel(nn.Module):
         return causal_mask
 
 
-class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
+class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.model = LlamaModel(config)
+        self.model = PhiModel(config)
         self.vocab_size = config.vocab_size
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=True)
 
     def get_input_embeddings(self):
         return self.model.embed_tokens

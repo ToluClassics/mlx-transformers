@@ -1,5 +1,4 @@
 import os
-import sys
 import unittest
 
 import mlx.core as mx
@@ -50,7 +49,6 @@ def load_hgf_model(model_name: str, hgf_model_class):
 
 
 class TestMlxXLMRoberta(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "FacebookAI/xlm-roberta-base"

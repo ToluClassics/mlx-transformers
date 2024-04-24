@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import mlx.core as mx
 
@@ -92,7 +92,6 @@ class CausalLMOutputWithPast:
 
 @dataclass
 class MaskedLMOutput:
-
     loss: Optional[mx.array] = None
     logits: mx.array = None
     hidden_states: Optional[Tuple[mx.array, ...]] = None

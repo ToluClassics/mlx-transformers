@@ -1,23 +1,23 @@
 import unittest
 
 import mlx.core as mx
-from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
+from transformers import AutoTokenizer, PhiConfig, PhiForCausalLM
 
-from src.mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
+from src.mlx_transformers.models import PhiForCausalLM as MlxPhiForCausalLM
 
 
-def load_hgf_model(model_name: str) -> LlamaForCausalLM:
-    model = LlamaForCausalLM.from_pretrained(model_name)
+def load_hgf_model(model_name: str) -> PhiForCausalLM:
+    model = PhiForCausalLM.from_pretrained(model_name)
     return model
 
 
-class TestMlxLlama(unittest.TestCase):
+class TestMlxPhi(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.model_name = "meta-llama/Llama-2-7b-hf"
-        config = LlamaConfig.from_pretrained(cls.model_name)
+        cls.model_name = "microsoft/phi-2"
+        config = PhiConfig.from_pretrained(cls.model_name)
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
-        cls.model = MlxLlamaForCausalLM(config)
+        cls.model = MlxPhiForCausalLM(config)
         cls.model.from_pretrained(cls.model_name)
 
         cls.input_text = "Hey, are you conscious? Can you talk to me?"

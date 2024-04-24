@@ -1,13 +1,11 @@
 "Utils for translation models"
 
 import argparse
-import os
 import time
 from typing import List, Tuple
 
 import mlx.core as mx
 import numpy as np
-import transformers
 from flores200_codes import FLORES_CODES
 from transformers import M2M100Config, NllbTokenizer, PreTrainedTokenizerBase
 
@@ -168,7 +166,6 @@ def run_translation_mlx(
 
 
 def main(args):
-
     model, tokenizer, tgt_token_id = load_mlx_nllb_model(
         model_name=args.model_name,
         source_language=args.source_language,

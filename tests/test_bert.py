@@ -31,7 +31,6 @@ def load_hgf_model(model_name: str, hgf_model_class):
 
 
 class TestMlxBert(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "bert-base-uncased"
@@ -65,7 +64,6 @@ class TestMlxBert(unittest.TestCase):
 
 
 class TestMlxBertForSequenceClassification(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "textattack/bert-base-uncased-yelp-polarity"
@@ -112,7 +110,6 @@ class TestMlxBertForSequenceClassification(unittest.TestCase):
 
 
 class TestMlxBertForTokenClassification(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "dslim/bert-base-NER"
@@ -177,7 +174,6 @@ class TestMlxBertForTokenClassification(unittest.TestCase):
 
 
 class TestMlxBertForQuestionAnswering(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "deepset/bert-base-cased-squad2"
