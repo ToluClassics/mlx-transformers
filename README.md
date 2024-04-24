@@ -96,7 +96,6 @@ The `examples` directory contains a few examples that demonstrate how to use the
     ```bash
     python3 examples/phi_generation.py
     ```
-    ![Phi Generation](docs/phi.gif)
 
 
 ## Benchmarks

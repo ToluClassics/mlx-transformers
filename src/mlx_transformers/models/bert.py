@@ -9,7 +9,14 @@ import mlx.nn as nn
 from transformers import BertConfig
 
 from .base import MlxPretrainedMixin
-from .modelling_outputs import *
+from .modelling_outputs import (
+    BaseModelOutputWithPastAndCrossAttentions,
+    BaseModelOutputWithPoolingAndCrossAttentions,
+    MaskedLMOutput,
+    QuestionAnsweringModelOutput,
+    SequenceClassifierOutput,
+    TokenClassifierOutput,
+)
 from .utils import ACT2FN, get_extended_attention_mask
 
 logger = logging.getLogger(__name__)
@@ -61,8 +68,8 @@ class BertSelfAttention(nn.Module):
             config, "embedding_size"
         ):
             raise ValueError(
-                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
-                f"heads ({config.num_attention_heads})"
+                f"The hidden size ({config.hidden_size}) is not a multiple of the number"
+                f"of attention heads ({config.num_attention_heads})"
             )
 
         self.num_attention_heads = config.num_attention_heads
@@ -96,13 +103,13 @@ class BertSelfAttention(nn.Module):
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
-        # Take the dot product between "query" and "key" to get the raw attention scores.
+        # Take the dot product between "query" and "key" to get the raw attention scores
         attention_scores = query_layer @ key_layer.transpose(0, 1, 3, 2)
 
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
 
         if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+            # Apply the attention mask is (precomputed for all layers in forward)
             attention_scores = attention_scores + attention_mask
 
         # Normalize the attention scores to probabilities.
@@ -153,7 +160,6 @@ class BertAttention(nn.Module):
         attention_mask: Optional[mx.array] = None,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mx.array]:
-
         self_outputs = self.self(
             hidden_states,
             attention_mask,
@@ -220,7 +226,6 @@ class BertLayer(nn.Module):
         past_key_value: Optional[Tuple[Tuple[mx.array]]] = None,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mx.array]:
-
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
@@ -260,7 +265,6 @@ class BertEncoder(nn.Module):
         all_self_attentions = () if output_attentions else None
 
         for i, layer_module in enumerate(self.layer):
-
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
@@ -335,7 +339,6 @@ class BertPredictionHeadTransform(nn.Module):
 
 
 class BertModel(nn.Module, MlxPretrainedMixin):
-
     def __init__(self, config, add_pooling_layer=True):
         super().__init__()
 
@@ -363,7 +366,6 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[List], BaseModelOutputWithPoolingAndCrossAttentions]:
-
         output_attentions = (
             output_attentions
             if output_attentions is not None
@@ -377,8 +379,6 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
-
-        use_cache = False
 
         input_shape = input_ids.shape
 
@@ -441,8 +441,6 @@ class BertLMPredictionHead(nn.Module):
         self.decoder = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
         self.bias = mx.zeros(config.vocab_size)
-
-        # Need a link between the two variables so that the bias is correctly resized with `resize_token_embeddings`
         self.decoder.bias = self.bias
 
     def __call__(self, hidden_states):
@@ -480,7 +478,6 @@ class BertForMaskedLM(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ):
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
@@ -547,9 +544,10 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
     ) -> Union[Tuple[mx.array], SequenceClassifierOutput]:
         r"""
         labels (`array` of shape `(batch_size,)`, *optional*):
-            Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
-            config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
-            `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
+            Labels for computing the sequence classification/regression loss.
+            Indices should be in `[0, ..., config.num_labels - 1]`.
+            If `config.num_labels == 1` a regression loss is computed (Mean-Square loss)
+            If `config.num_labels > 1` a classification loss is computed (Cross-Entropy)
         """
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict

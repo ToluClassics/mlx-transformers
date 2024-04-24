@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Dict
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -8,7 +8,10 @@ from transformers import LlamaConfig
 
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
-from .modelling_outputs import *
+from .modelling_outputs import (
+    BaseModelOutputWithPast,
+    CausalLMOutputWithPast,
+)
 from .utils import ACT2FN
 
 
@@ -54,7 +57,7 @@ class LlamaRotaryEmbedding(nn.Module):
         t = t / self.scaling_factor
         freqs = mx.outer(t, self.inv_freq)
 
-        emb = mx.concatenate([freqs, freqs], axis=-1)
+        mx.concatenate([freqs, freqs], axis=-1)
 
     def __call__(self, x, position_ids):
         inv_freq_expanded = self.inv_freq[None, :, None].astype(mx.float32)
@@ -75,7 +78,6 @@ class LlamaRotaryEmbedding(nn.Module):
 
 
 class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
-
     def __call__(self, x, position_ids):
         position_ids = position_ids / self.scaling_factor
         cos, sin = super().__call__(x, position_ids)
@@ -83,7 +85,6 @@ class LlamaLinearScalingRotaryEmbedding(LlamaRotaryEmbedding):
 
 
 class LlamaDynamicNTKScalingRotaryEmbedding(LlamaRotaryEmbedding):
-
     def forward(self, x, position_ids):
         seq_len = mx.max(position_ids) + 1
         if seq_len > self.max_position_embeddings:
@@ -130,7 +131,6 @@ class LlamaMLP(nn.Module):
 
 
 def repeat_kv(hidden_states, n_rep):
-
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
@@ -219,7 +219,6 @@ class LlamaAttention(nn.Module):
         use_cache=False,
         cache_position=None,
     ):
-
         bsz, q_len, _ = hidden_states.shape
 
         query_states = self.q_proj(hidden_states)
@@ -546,7 +545,6 @@ class LlamaModel(nn.Module):
         cache_position: mx.array,
         past_seen_tokens: int,
     ):
-
         dtype = input_tensor.dtype
         min_dtype = np.finfo(np.float32).min
         sequence_length = input_tensor.shape[1]
@@ -610,7 +608,6 @@ class LlamaModel(nn.Module):
 
 
 class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
-
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -667,8 +664,9 @@ class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
             position_ids = attention_mask.astype(mx.int32).cumsum(-1) - 1
-            position_ids, attention_mask = np.array(position_ids), np.array(
-                attention_mask
+            position_ids, attention_mask = (
+                np.array(position_ids),
+                np.array(attention_mask),
             )
 
             position_ids = np.ma.array(

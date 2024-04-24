@@ -1,5 +1,6 @@
 import math
-from typing import Optional
+import logging
+from typing import Optional, Dict, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -8,8 +9,13 @@ from transformers import AutoConfig
 
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
-from .modelling_outputs import *
+from .modelling_outputs import (
+    BaseModelOutputWithPast,
+    CausalLMOutputWithPast,
+)
 from .utils import ACT2FN
+
+logger = logging.getLogger(__name__)
 
 
 class Phi3RMSNorm(nn.Module):
@@ -162,7 +168,6 @@ class Phi3MLP(nn.Module):
 
 
 def repeat_kv(hidden_states, n_rep):
-
     batch, num_key_value_heads, slen, head_dim = hidden_states.shape
     if n_rep == 1:
         return hidden_states
@@ -252,7 +257,6 @@ class Phi3Attention(nn.Module):
         output_attentions=False,
         use_cache=False,
     ):
-
         bsz, q_len, _ = hidden_states.shape
 
         qkv = self.qkv_proj(hidden_states)
@@ -351,15 +355,7 @@ class Phi3SdpaAttention(Phi3Attention):
         output_attentions: bool = False,
         use_cache: bool = False,
     ) -> Tuple[mx.array, Optional[mx.array], Optional[Tuple[mx.array]]]:
-
         if output_attentions:
-            # TODO: Improve this warning with e.g. `model.config.attn_implementation = "manual"` once this is implemented.
-            logger.warning_once(
-                "Phi3Model is using Phi3SdpaAttention, but `torch.nn.functional.scaled_dot_product_attention` does not "
-                "support `output_attentions=True`. Falling back to the manual attention implementation, but specifying "
-                "the manual implementation will be required from Transformers version v5.0.0 onwards. This warning can "
-                'be removed using the argument `attn_implementation="eager"` when loading the model.'
-            )
             return super().__call__(
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
@@ -637,7 +633,6 @@ class Phi3Model(nn.Module):
         cache_position: mx.array,
         past_seen_tokens: int,
     ):
-
         dtype = input_tensor.dtype
         min_dtype = np.finfo(np.float32).min
         sequence_length = input_tensor.shape[1]
@@ -701,7 +696,6 @@ class Phi3Model(nn.Module):
 
 
 class Phi3ForCausalLM(nn.Module, MlxPretrainedMixin):
-
     def __init__(self, config):
         super().__init__()
         self.config = config
@@ -758,8 +752,9 @@ class Phi3ForCausalLM(nn.Module, MlxPretrainedMixin):
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
             position_ids = attention_mask.astype(mx.int32).cumsum(-1) - 1
-            position_ids, attention_mask = np.array(position_ids), np.array(
-                attention_mask
+            position_ids, attention_mask = (
+                np.array(position_ids),
+                np.array(attention_mask),
             )
 
             position_ids = np.ma.array(

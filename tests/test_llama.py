@@ -1,9 +1,6 @@
-import os
-import sys
 import unittest
 
 import mlx.core as mx
-import numpy as np
 from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
 
 from src.mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
@@ -15,7 +12,6 @@ def load_hgf_model(model_name: str) -> LlamaForCausalLM:
 
 
 class TestMlxLlama(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "meta-llama/Llama-2-7b-hf"

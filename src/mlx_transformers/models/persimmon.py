@@ -1,15 +1,5 @@
-import math
-from typing import Optional
-
 import mlx.core as mx
 import mlx.nn as nn
-import numpy as np
-from transformers import LlamaConfig
-
-from .base import MlxPretrainedMixin
-from .cache import Cache, DynamicCache
-from .modelling_outputs import *
-from .utils import ACT2FN
 
 
 class PersimmonRotaryEmbedding(nn.Module):
@@ -31,7 +21,6 @@ class PersimmonRotaryEmbedding(nn.Module):
         self.emb = mx.concatenate([freqs, freqs], axis=-1)
 
     def __call__(self, x, seq_len=None):
-
         cos = mx.cos(self.emb)
         sin = mx.sin(self.emb)
 

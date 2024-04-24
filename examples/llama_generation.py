@@ -1,14 +1,11 @@
 import argparse
-import os
 import time
-from pathlib import Path
 from typing import Tuple
 
 import mlx.core as mx
-from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
+from transformers import AutoTokenizer, LlamaConfig
 
 from mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
-from mlx_transformers.models.utils import convert
 
 
 def tic():
@@ -38,7 +35,6 @@ def load_model(
         _type_: _description_
     """
     config = LlamaConfig.from_pretrained(model_name)
-    current_directory = os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
     model.from_pretrained(model_name)
@@ -93,7 +89,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--prompt",
-        help="The message to be processed by the model. Ignored when --few-shot is provided.",
+        help="The message to be processed by the model.",
         default="In the beginning the Universe was created.",
     )
     parser.add_argument(

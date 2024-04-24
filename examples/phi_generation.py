@@ -1,11 +1,10 @@
 import argparse
 import os
 import time
-from pathlib import Path
 from typing import Tuple
 
 import mlx.core as mx
-from transformers import AutoTokenizer, PhiConfig, PhiForCausalLM
+from transformers import AutoTokenizer, PhiConfig
 
 from mlx_transformers.models import PhiForCausalLM as MlxPhiForCausalLM
 
@@ -37,7 +36,7 @@ def load_model(
         _type_: _description_
     """
     config = PhiConfig.from_pretrained(model_name)
-    current_directory = os.path.dirname(os.path.realpath(__file__))
+    os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
     model.from_pretrained(model_name)
@@ -92,7 +91,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--prompt",
-        help="The message to be processed by the model. Ignored when --few-shot is provided.",
+        help="The message to be processed by the model.",
         default="In the beginning the Universe was created.",
     )
     parser.add_argument(

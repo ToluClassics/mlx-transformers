@@ -1,9 +1,6 @@
-import os
-import sys
 import unittest
 
 import mlx.core as mx
-import numpy as np
 from transformers import AutoTokenizer, PhiConfig, PhiForCausalLM
 
 from src.mlx_transformers.models import PhiForCausalLM as MlxPhiForCausalLM
@@ -15,7 +12,6 @@ def load_hgf_model(model_name: str) -> PhiForCausalLM:
 
 
 class TestMlxPhi(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "microsoft/phi-2"
