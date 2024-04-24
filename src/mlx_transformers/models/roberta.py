@@ -524,7 +524,7 @@ class RobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
                     self.config.problem_type = "regression"
                 elif self.num_labels > 1 and (
                     labels.dtype == mx.long or labels.dtype == mx.int
-                    ):
+                ):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"

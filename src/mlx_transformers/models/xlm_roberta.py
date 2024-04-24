@@ -8,7 +8,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from transformers import XLMRobertaConfig
 
-from .base import MlxPretrainedMixin 
+from .base import MlxPretrainedMixin
 from .modelling_outputs import *
 from .utils import ACT2FN, get_extended_attention_mask
 
@@ -459,7 +459,9 @@ class XLMRobertaClassificationHead(nn.Module):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         classifier_dropout = (
-            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
+            config.classifier_dropout
+            if config.classifier_dropout is not None
+            else config.hidden_dropout_prob
         )
         self.dropout = nn.Dropout(classifier_dropout)
         self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
@@ -472,7 +474,6 @@ class XLMRobertaClassificationHead(nn.Module):
         x = self.dropout(x)
         x = self.out_proj(x)
         return x
-    
 
 
 class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
@@ -483,7 +484,6 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
 
         self.roberta = XLMRobertaModel(config, add_pooling_layer=False)
         self.classifier = XLMRobertaClassificationHead(config)
-
 
     def __call__(
         self,
@@ -497,7 +497,9 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], SequenceClassifierOutput]:
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.roberta(
             input_ids,
@@ -520,7 +522,7 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
                     self.config.problem_type = "regression"
                 elif self.num_labels > 1 and (
                     labels.dtype == mx.long or labels.dtype == mx.int
-                    ):
+                ):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
@@ -533,8 +535,7 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
                     loss = loss_fct(logits, labels)
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = nn.losses.cross_entropy
-                loss = loss_fct(
-                    logits.view(-1, self.num_labels), labels.view(-1))
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = nn.losses.binary_cross_entropy
                 loss = loss_fct(logits, labels)
@@ -549,7 +550,7 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    
+
 
 class XLMRobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
@@ -559,11 +560,12 @@ class XLMRobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
 
         self.roberta = XLMRobertaModel(config, add_pooling_layer=False)
         classifier_dropout = (
-            config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
+            config.classifier_dropout
+            if config.classifier_dropout is not None
+            else config.hidden_dropout_prob
         )
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-
 
     def __call__(
         self,
@@ -577,7 +579,9 @@ class XLMRobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], TokenClassifierOutput]:
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.roberta(
             input_ids,
@@ -611,12 +615,13 @@ class XLMRobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    
+
+
 class XLMRobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
-        self.config = config 
+        self.config = config
 
         self.roberta = XLMRobertaModel(config, add_pooling_layer=False)
         self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
@@ -634,7 +639,9 @@ class XLMRobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], QuestionAnsweringModelOutput]:
 
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.roberta(
             input_ids,
@@ -674,8 +681,7 @@ class XLMRobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
 
         if not return_dict:
             output = (start_logits, end_logits) + outputs[2:]
-            return ((total_loss,) +
-                    output) if total_loss is not None else output
+            return ((total_loss,) + output) if total_loss is not None else output
 
         return QuestionAnsweringModelOutput(
             loss=total_loss,
@@ -684,4 +690,3 @@ class XLMRobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
-    
