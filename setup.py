@@ -13,7 +13,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="mlx-transformers",
-    version="0.1.2",
+    version="0.1.3",
     author="Ogundepo Odunayo",
     author_email="ogundepoodunayo@gmail.com",
     description=description,
