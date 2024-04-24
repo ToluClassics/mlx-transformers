@@ -8,6 +8,7 @@ import mlx.core as mx
 import mlx.nn as nn
 from transformers import XLMRobertaConfig
 
+from .base import MlxPretrainedMixin 
 from .modelling_outputs import *
 from .utils import ACT2FN, get_extended_attention_mask
 
@@ -354,7 +355,7 @@ class XLMRobertaPooler(nn.Module):
         return pooled_output
 
 
-class XLMRobertaModel(nn.Module):
+class XLMRobertaModel(nn.Module, MlxPretrainedMixin):
 
     def __init__(self, config, add_pooling_layer=True):
         super().__init__()
@@ -474,7 +475,7 @@ class XLMRobertaClassificationHead(nn.Module):
     
 
 
-class XLMRobertaForSequenceClassification(nn.Module):
+class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
@@ -550,7 +551,7 @@ class XLMRobertaForSequenceClassification(nn.Module):
         )
     
 
-class XLMRobertaForTokenClassification(nn.Module):
+class XLMRobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
@@ -611,7 +612,7 @@ class XLMRobertaForTokenClassification(nn.Module):
             attentions=outputs.attentions,
         )
     
-class XLMRobertaForQuestionAnswering(nn.Module):
+class XLMRobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
     def __init__(self, config):
         super().__init__()
         self.num_labels = config.num_labels
