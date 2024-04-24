@@ -15,6 +15,15 @@ This library is available on PyPI and can be installed using pip:
 pip install mlx-transformers
 ```
 
+It is also recommended to install [`asitop`](https://github.com/tlkh/asitop)
+which can be super useful for monitoring the GPU and CPU usage on Apple Silicon devices.
+
+## Models Supported
+
+- Phi Family of Models (Phi3, Phi2, Phi)
+- LLama
+- Machine Translation Models (NLLB, M2M-100)
+- Encoder Models (Bert, RoBERTa, XLMRoberta, Sentence Transformers)
 
 ## Quick Tour
 
@@ -76,7 +85,7 @@ sentence_embeddings = _mean_pooling(outputs.last_hidden_state, inputs.attention_
 ```
 
 
-## Examples
+## Other Examples
 
 The `examples` directory contains a few examples that demonstrate how to use the models in MLX Transformers. 
 
@@ -92,9 +101,9 @@ The `examples` directory contains a few examples that demonstrate how to use the
     Output:==> ['Ẹ jẹ́ ká tú àwọn ẹsẹ Bíbélì sí èdè Yoruba']
     ```
 
-3. [Phi Generation Example](examples/phi_generation.py)
+3. [Phi Generation Example](examples/phi3_generation.py)
     ```bash
-    python3 examples/phi_generation.py
+    python3 examples/phi3_generation.py --temp 1.0
     ```
 
 

@@ -21,6 +21,7 @@ class MlxPretrainedMixin:
         revision: Optional[str] = "main",
         float16: bool = False,
         huggingface_model_architecture: Optional[Callable] = None,
+        trust_remote_code: bool = False,
     ):
         if huggingface_model_architecture:
             architecture = huggingface_model_architecture
@@ -32,9 +33,15 @@ class MlxPretrainedMixin:
         transformers_module = importlib.import_module("transformers")
         _class = getattr(transformers_module, architecture, None)
 
+        if not _class:
+            raise ValueError(f"Could not find the class for {architecture}")
+
         dtype = mx.float16 if float16 else mx.float32
 
-        model = _class.from_pretrained(model_name_or_path)
+        model = _class.from_pretrained(
+            model_name_or_path, trust_remote_code=trust_remote_code
+        )
+
         # # save the tensors
         tensors = {
             key: mx.array(tensor.numpy()).astype(dtype)

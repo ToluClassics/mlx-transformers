@@ -265,14 +265,15 @@ class PhiAttention(nn.Module):
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            cache_kwargs = {
+            _cache_kwargs = {
                 "sin": sin,
                 "cos": cos,
                 "partial_rotation_size": self.rotary_emb.dim,
             }
-            key_states, value_states = past_key_value.update(
-                key_states, value_states, self.layer_idx, cache_kwargs
-            )
+            # Todo: fix
+            # key_states, value_states = past_key_value.update(
+            #     key_states, value_states, self.layer_idx, cache_kwargs
+            # )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
