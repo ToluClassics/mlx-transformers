@@ -32,7 +32,8 @@ class SequenceClassifierOutput:
     logits: mx.array = None
     hidden_states: Optional[Tuple[mx.array, ...]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None
- 
+
+
 @dataclass
 class SequenceClassifierOutputWithPast:
     loss: Optional[mx.array] = None
@@ -53,6 +54,7 @@ class Seq2SeqSequenceClassifierOutput:
     encoder_last_hidden_state: Optional[mx.array] = None
     encoder_hidden_states: Optional[Tuple[mx.array, ...]] = None
     encoder_attentions: Optional[Tuple[mx.array, ...]] = None
+
 
 @dataclass
 class TokenClassifierOutput:
@@ -84,5 +86,14 @@ class CausalLMOutputWithPast:
     loss: Optional[mx.array] = None
     logits: mx.array = None
     past_key_values: Optional[Tuple[Tuple[mx.array]]] = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class MaskedLMOutput:
+
+    loss: Optional[mx.array] = None
+    logits: mx.array = None
     hidden_states: Optional[Tuple[mx.array, ...]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None

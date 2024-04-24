@@ -38,11 +38,13 @@ class TestMlxLlama(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.model_name = "meta-llama/Llama-2-7b-hf"
         config = LlamaConfig.from_pretrained(cls.model_name)
-
-        cls.model = load_model(
-            cls.model_name, config, LlamaForCausalLM, MlxLlamaForCausalLM
-        )
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
+        cls.model = MlxLlamaForCausalLM(config)
+        cls.model.from_pretrained(cls.model_name)
+
+        # cls.model = load_model(
+        #     cls.model_name, config, LlamaForCausalLM, MlxLlamaForCausalLM
+        # )
         cls.input_text = "Hey, are you conscious? Can you talk to me?"
 
     def test_forward(self) -> None:
@@ -51,4 +53,4 @@ class TestMlxLlama(unittest.TestCase):
         inputs = {key: mx.array(v) for key, v in inputs.items()}
         outputs = self.model(**inputs, use_cache=True)
 
-        assert type(outputs.last_hidden_state) == mx.array
+        assert type(outputs.logits) == mx.array
