@@ -13,15 +13,6 @@ Contributions to mlx-transformers are welcome. We need help to improve the libra
  
    You can also run the formatters manually as follows on individual files:
  
-     ```bash
-     clang-format -i file.cpp
-     ```
- 
-     ```bash
-     black file.py
-     ```
-
-     or,
 
      ```bash
      # single file

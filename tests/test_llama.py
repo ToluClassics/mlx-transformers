@@ -7,24 +7,6 @@ import numpy as np
 from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
 
 from src.mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
-from src.mlx_transformers.models.utils import convert
-
-
-def load_model(model_name: str, config, hgf_model_class, mlx_model_class):
-    current_directory = os.path.dirname(os.path.realpath(__file__))
-    weights_path = os.path.join(
-        current_directory, "model_checkpoints", model_name.replace("/", "-") + ".npz"
-    )
-
-    if not os.path.exists(weights_path):
-        convert(model_name, weights_path, hgf_model_class)
-
-    model = mlx_model_class(config)
-
-    print(model)
-
-    model.load_weights(weights_path, strict=False)
-    return model
 
 
 def load_hgf_model(model_name: str) -> LlamaForCausalLM:
@@ -42,9 +24,6 @@ class TestMlxLlama(unittest.TestCase):
         cls.model = MlxLlamaForCausalLM(config)
         cls.model.from_pretrained(cls.model_name)
 
-        # cls.model = load_model(
-        #     cls.model_name, config, LlamaForCausalLM, MlxLlamaForCausalLM
-        # )
         cls.input_text = "Hey, are you conscious? Can you talk to me?"
 
     def test_forward(self) -> None:

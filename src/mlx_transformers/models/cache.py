@@ -7,6 +7,7 @@ import mlx.core as mx
 logger = logging.getLogger(__name__)
 
 
+# Adapted from: https://github.com/huggingface/transformers/blob/e74d793a3c3c0bc9bf3fb94bb31dd16934b1b0db/src/transformers/cache_utils.py#L14
 @dataclass
 class Cache:
     """
