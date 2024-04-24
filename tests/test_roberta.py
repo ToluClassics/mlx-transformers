@@ -4,25 +4,27 @@ import unittest
 import mlx.core as mx
 import numpy as np
 from transformers import (
+    AutoTokenizer,
     RobertaConfig,
-    RobertaModel,
-    RobertaTokenizer,
+    RobertaForQuestionAnswering,
     RobertaForSequenceClassification,
     RobertaForTokenClassification,
     RobertaForQuestionAnswering,
     AutoTokenizer,
+    RobertaModel,
+    RobertaTokenizer,
 )
 
-from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
+from src.mlx_transformers.models import (
+    RobertaForQuestionAnswering as MlxRobertaForQuestionAnswering,
+)
 from src.mlx_transformers.models import (
     RobertaForSequenceClassification as MlxRobertaForSequenceClassification,
 )
 from src.mlx_transformers.models import (
     RobertaForTokenClassification as MlxRobertaForTokenClassification,
 )
-from src.mlx_transformers.models import (
-    RobertaForQuestionAnswering as MlxRobertaForQuestionAnswering,
-)
+from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
 from src.mlx_transformers.models.utils import convert
 
 

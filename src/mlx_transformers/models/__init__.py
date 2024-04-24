@@ -16,4 +16,9 @@ from .roberta import (
     RobertaForTokenClassification,
     RobertaModel,
 )
-from .xlm_roberta import XLMRobertaModel
+from .xlm_roberta import (
+    XLMRobertaForQuestionAnswering,
+    XLMRobertaForSequenceClassification,
+    XLMRobertaForTokenClassification,
+    XLMRobertaModel,
+)
