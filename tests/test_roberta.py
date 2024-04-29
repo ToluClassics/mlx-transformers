@@ -9,8 +9,6 @@ from transformers import (
     RobertaForQuestionAnswering,
     RobertaForSequenceClassification,
     RobertaForTokenClassification,
-    RobertaForQuestionAnswering,
-    AutoTokenizer,
     RobertaModel,
     RobertaTokenizer,
 )
