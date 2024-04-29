@@ -89,21 +89,21 @@ sentence_embeddings = _mean_pooling(outputs.last_hidden_state, inputs.attention_
 
 The `examples` directory contains a few examples that demonstrate how to use the models in MLX Transformers. 
 
-1. [LLama Example](examples/llama_generation.py)
+1. [LLama Example](examples/text_generation/llama_generation.py)
     ```bash
     python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf"  
     ```
 
-2. [NLLB Translation Example](examples/nllb_translation.py)
+2. [NLLB Translation Example](examples/translation/nllb_translation.py)
     ```bash
-    python3 examples/nllb_translation.py --model_name facebook/nllb-200-distilled-600M --source_language English --target_language Yoruba --text_to_translate "Let us translate text to Yoruba"
+    python3 examples/translation/nllb_translation.py --model_name facebook/nllb-200-distilled-600M --source_language English --target_language Yoruba --text_to_translate "Let us translate text to Yoruba"
 
     Output:==> ['Ẹ jẹ́ ká tú àwọn ẹsẹ Bíbélì sí èdè Yoruba']
     ```
 
-3. [Phi Generation Example](examples/phi3_generation.py)
+3. [Phi Generation Example](examples/text_generation/phi3_generation.py)
     ```bash
-    python3 examples/phi3_generation.py --temp 1.0
+    python3 examples/text_generation/phi3_generation.py --temp 1.0
     ```
 
 

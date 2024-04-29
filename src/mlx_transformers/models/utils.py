@@ -31,8 +31,20 @@ class NewGELUActivation(nn.Module):
         )
 
 
+class ReLUSquaredActivation(nn.Module):
+    """
+    Applies the relu^2 activation introduced in https://arxiv.org/abs/2109.08668v2
+    """
+
+    def __call__(self, input):
+        relu_applied = nn.layers.activations.relu(input)
+        squared = mx.square(relu_applied)
+        return squared
+
+
 ACT2FN = {
     "relu": nn.ReLU(),
+    "relu2": ReLUSquaredActivation(),
     "gelu": nn.GELU(),
     "silu": nn.SiLU(),
     "gelu_new": NewGELUActivation(),

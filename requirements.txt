@@ -7,3 +7,4 @@ tokenizers>=0.19.1
 torch>=2.2.2
 tqdm>=4.66.2
 transformers>=4.40.0
+pillow==10.3.0

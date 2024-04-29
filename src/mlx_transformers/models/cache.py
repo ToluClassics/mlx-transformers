@@ -140,8 +140,12 @@ class DynamicCache(Cache):
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
         else:
-            self.key_cache[layer_idx] = key_states
-            self.value_cache[layer_idx] = value_states
+            self.key_cache[layer_idx] = mx.concatenate(
+                [self.key_cache[layer_idx], key_states], axis=-2
+            )
+            self.value_cache[layer_idx] = mx.concatenate(
+                [self.value_cache[layer_idx], value_states], axis=-2
+            )
 
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
