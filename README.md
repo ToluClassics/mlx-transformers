@@ -22,6 +22,7 @@ which can be super useful for monitoring the GPU and CPU usage on Apple Silicon 
 
 - Phi Family of Models (Phi3, Phi2, Phi)
 - LLama
+- Fuyu and Persimmon
 - Machine Translation Models (NLLB, M2M-100)
 - Encoder Models (Bert, RoBERTa, XLMRoberta, Sentence Transformers)
 
