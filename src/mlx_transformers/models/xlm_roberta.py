@@ -12,6 +12,9 @@ from transformers import XLMRobertaConfig
 from .modelling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,
+    SequenceClassifierOutput,
+    QuestionAnsweringModelOutput,
+    TokenClassifierOutput,
 )
 from .base import MlxPretrainedMixin
 from .utils import ACT2FN, get_extended_attention_mask
@@ -491,7 +494,6 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], SequenceClassifierOutput]:
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
@@ -573,7 +575,6 @@ class XLMRobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], TokenClassifierOutput]:
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
@@ -633,7 +634,6 @@ class XLMRobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple[mx.array], QuestionAnsweringModelOutput]:
-
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
