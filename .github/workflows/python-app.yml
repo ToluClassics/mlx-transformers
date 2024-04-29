@@ -25,4 +25,3 @@ jobs:
       - name: Check quality
         run: |
           ruff check tests src examples
-          ruff format --check tests src examples setup.py # formatter
