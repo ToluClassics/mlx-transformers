@@ -21,7 +21,7 @@ def toc(msg, start):
 
 
 def load_model(
-    model_name: str, mlx_model_class
+    model_name: str, mlx_model_class, fp16: bool = False
 ) -> Tuple[MlxPhi3ForCausalLM, AutoTokenizer]:
     """
     Load a llama model and tokenizer from the given model name and weights.
@@ -43,6 +43,7 @@ def load_model(
         model_name,
         huggingface_model_architecture="AutoModelForCausalLM",
         trust_remote_code=True,
+        fp16=fp16,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -87,7 +88,7 @@ def generate(model: MlxPhi3ForCausalLM, tokenizer: AutoTokenizer, args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Llama inference script")
+    parser = argparse.ArgumentParser(description="Phi3 inference script")
     parser.add_argument(
         "--model-name",
         help="The model name to load",
@@ -108,6 +109,9 @@ if __name__ == "__main__":
         "--temp", type=float, default=0.0, help="The sampling temperature"
     )
     parser.add_argument("--seed", type=int, default=0, help="The PRNG seed")
+    parser.add_argument(
+        "--fp16", action="store_true", help="Use mixed precision for inference"
+    )
 
     args = parser.parse_args()
 

@@ -437,15 +437,14 @@ class Phi3SdpaAttention(Phi3Attention):
                 )
 
         attn_output = mx.fast.scaled_dot_product_attention(
-            query_states,
-            key_states,
-            value_states,
+            q=query_states,
+            k=key_states,
+            v=value_states,
             mask=attention_mask,
-            dropout_p=self.attention_dropout if self.training else 0.0,
         )
 
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.view(bsz, q_len, self.hidden_size)
+        attn_output = attn_output.transpose(0, 2, 1)
+        attn_output = attn_output.reshape(bsz, q_len, self.hidden_size)
 
         attn_output = self.o_proj(attn_output)
 
@@ -903,6 +902,8 @@ class Phi3ForCausalLM(nn.Module, MlxPretrainedMixin):
 
         next_token_logits = output.logits[:, -1, :]
         next_token = sample(next_token_logits)
+
+        yield next_token
 
         while True:
             # Update the prompt
