@@ -265,15 +265,14 @@ class PhiAttention(nn.Module):
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; cache_position needed for the static cache
-            _cache_kwargs = {
+            cache_kwargs = {
                 "sin": sin,
                 "cos": cos,
                 "partial_rotation_size": self.rotary_emb.dim,
             }
-            # Todo: fix
-            # key_states, value_states = past_key_value.update(
-            #     key_states, value_states, self.layer_idx, cache_kwargs
-            # )
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -783,6 +782,78 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
             attentions=outputs.attentions,
         )
 
+    def prepare_inputs_for_generation(
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        **kwargs,
+    ):
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                cache_length = past_key_values.get_seq_length()
+                past_length = past_key_values.seen_tokens
+                max_cache_length = past_key_values.get_max_length()
+            else:
+                cache_length = past_length = past_key_values[0][0].shape[2]
+                max_cache_length = None
+
+            # Keep only the unprocessed tokens:
+            # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
+            # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as
+            # input)
+            if (
+                attention_mask is not None
+                and attention_mask.shape[1] > input_ids.shape[1]
+            ):
+                input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
+            # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
+            # input_ids based on the past_length.
+            elif past_length < input_ids.shape[1]:
+                input_ids = input_ids[:, past_length:]
+            # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids only has unprocessed tokens.
+
+            # If we are about to go beyond the maximum cache length, we need to crop the input attention mask.
+            if (
+                max_cache_length is not None
+                and attention_mask is not None
+                and cache_length + input_ids.shape[1] > max_cache_length
+            ):
+                attention_mask = attention_mask[:, -max_cache_length:]
+
+        position_ids = kwargs.get("position_ids", None)
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.astype(mx.int32).cumsum(-1) - 1
+            position_ids, attention_mask = (
+                np.array(position_ids),
+                np.array(attention_mask),
+            )
+
+            position_ids = np.ma.array(
+                data=position_ids, mask=attention_mask == 0
+            ).filled(1)
+            position_ids = mx.array(position_ids)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "position_ids": position_ids,
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "attention_mask": attention_mask,
+            }
+        )
+        return model_inputs
+
     def generate(self, inputs: Dict, max_length: int, **kwargs):
         temp = kwargs.get("temp", 1.0)
 
@@ -802,17 +873,24 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
         while True:
             # Update the prompt
             next_token = mx.expand_dims(next_token, axis=0)
-            inputs["input_ids"] = mx.concatenate(
-                [inputs["input_ids"], next_token], axis=-1
+
+            inputs["input_ids"] = next_token
+            inputs["attention_mask"] = mx.concatenate(
+                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)], axis=-1
             )
-            inputs["attention_mask"] = mx.ones_like(inputs["input_ids"])
 
             past_key_values = output.past_key_values
-            output = self(
-                **inputs, past_key_values=past_key_values, use_cache=use_cache
+            inputs = self.prepare_inputs_for_generation(
+                input_ids=inputs["input_ids"],
+                past_key_values=past_key_values,
+                attention_mask=inputs["attention_mask"],
+                inputs_embeds=None,
             )
 
+            output = self(**inputs)
+
             next_token_logits = output.logits[:, -1, :]
+
             next_token = sample(next_token_logits)
 
             yield next_token
