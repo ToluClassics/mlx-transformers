@@ -48,6 +48,7 @@ ACT2FN = {
     "gelu": nn.GELU(),
     "silu": nn.SiLU(),
     "gelu_new": NewGELUActivation(),
+    "swish": nn.SiLU(),
 }
 
 

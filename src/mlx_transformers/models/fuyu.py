@@ -258,6 +258,8 @@ class FuyuForCausalLM(nn.Module, MlxPretrainedMixin):
         next_token_logits = output.logits[:, -1, :]
         next_token = sample(next_token_logits)
 
+        yield next_token
+
         while True:
             # Update the prompt
             next_token = mx.expand_dims(next_token, axis=0)

@@ -4,9 +4,9 @@ import time
 from typing import Tuple
 
 import mlx.core as mx
-from transformers import AutoTokenizer, PhiConfig
+from transformers import AutoTokenizer, AutoConfig
 
-from mlx_transformers.models import PhiForCausalLM as MlxPhiForCausalLM
+from mlx_transformers.models import OpenELMForCausalLM as MlxOpenELMForCausalLM
 
 
 def tic():
@@ -21,8 +21,8 @@ def toc(msg, start):
 
 
 def load_model(
-    model_name: str, mlx_model_class, fp16: bool = False
-) -> Tuple[MlxPhiForCausalLM, AutoTokenizer]:
+    model_name: str, mlx_model_class
+) -> Tuple[MlxOpenELMForCausalLM, AutoTokenizer]:
     """
     Load a llama model and tokenizer from the given model name and weights.
 
@@ -35,27 +35,33 @@ def load_model(
     Returns:
         _type_: _description_
     """
-    config = PhiConfig.from_pretrained(model_name)
+    config = AutoConfig.from_pretrained(model_name)
     os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
-    model.from_pretrained(model_name, fp16=fp16)
+    model.from_pretrained(
+        model_name,
+        huggingface_model_architecture="AutoModelForCausalLM",
+        trust_remote_code=True,
+    )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
 
     return model, tokenizer
 
 
-def generate(model: MlxPhiForCausalLM, tokenizer: AutoTokenizer, args):
+def generate(model: MlxOpenELMForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
     inputs = tokenizer(args.prompt, return_tensors="np", truncation=True)
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
+    print(inputs["input_ids"][0])
+
     skip = 0
     prompt_processing = None
     tokens = []
     start = tic()
-    for token in model.generate(inputs, args.temp):
+    for token in model.generate(inputs, max_length=args.max_tokens, temp=args.temp):
         tokens.append(token)
 
         if len(tokens) == 1:
@@ -83,36 +89,36 @@ def generate(model: MlxPhiForCausalLM, tokenizer: AutoTokenizer, args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phi inference script")
+    parser = argparse.ArgumentParser(description="Llama inference script")
     parser.add_argument(
         "--model-name",
         help="The model name to load",
-        default="microsoft/phi-2",
+        default="apple/OpenELM-1_1B-Instruct",
     )
     parser.add_argument(
         "--prompt",
         help="The message to be processed by the model.",
-        default="In the beginning the Universe was created.",
+        default="Who is your daddy and what does he do?",
     )
     parser.add_argument(
         "--max-tokens", "-m", type=int, default=100, help="How many tokens to generate"
     )
     parser.add_argument(
-        "--write-every", type=int, default=1, help="After how many tokens to detokenize"
+        "--write-every", type=int, default=5, help="After how many tokens to detokenize"
     )
     parser.add_argument(
         "--temp", type=float, default=0.0, help="The sampling temperature"
     )
     parser.add_argument("--seed", type=int, default=0, help="The PRNG seed")
-    parser.add_argument(
-        "--fp16", action="store_true", help="Use mixed precision for inference"
-    )
 
     args = parser.parse_args()
 
     mx.random.seed(args.seed)
     mx.set_default_device(mx.gpu)
 
-    model, tokenizer = load_model(args.model_name, MlxPhiForCausalLM)
+    model, tokenizer = load_model(
+        args.model_name,
+        MlxOpenELMForCausalLM,
+    )
 
     generate(model, tokenizer, args)
