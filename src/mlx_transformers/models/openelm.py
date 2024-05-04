@@ -671,10 +671,6 @@ class OpenELMForCausalLM(nn.Module, MlxPretrainedMixin):
         use_cache=True,
         **kwargs,
     ):
-        # print("input_ids", input_ids)
-        # print("attention_mask", attention_mask)
-        # print("attention_mask", attention_mask.shape)
-
         past_length = 0
         if past_key_values is not None:
             if isinstance(past_key_values, Cache):
@@ -686,20 +682,25 @@ class OpenELMForCausalLM(nn.Module, MlxPretrainedMixin):
                 max_cache_length = None
 
             # Keep only the unprocessed tokens:
-            # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
-            # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as input)
+            # 1 - If the length of the attention_mask exceeds the length of input_ids,
+            # then we are in a setting where
+            # some of the inputs are exclusively passed as part of the cache (e.g.
+            # when passing input_embeds as input)
             if (
                 attention_mask is not None
                 and attention_mask.shape[1] > input_ids.shape[1]
             ):
                 input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
-            # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
+            # 2 - If the past_length is smaller than input_ids', then input_ids holds
+            # all input tokens. We can discard
             # input_ids based on the past_length.
             elif past_length < input_ids.shape[1]:
                 input_ids = input_ids[:, past_length:]
-            # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids only has unprocessed tokens.
+            # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids
+            # only has unprocessed tokens.
 
-            # If we are about to go beyond the maximum cache length, we need to crop the input attention mask.
+            # If we are about to go beyond the maximum cache length, we need to crop the
+            # input attention mask.
             if (
                 max_cache_length is not None
                 and attention_mask is not None

@@ -55,7 +55,6 @@ def generate(model: MlxOpenELMForCausalLM, tokenizer: AutoTokenizer, args):
     inputs = tokenizer(args.prompt, return_tensors="np", truncation=True)
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
-    print(inputs["input_ids"][0])
 
     skip = 0
     prompt_processing = None
