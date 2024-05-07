@@ -555,7 +555,7 @@ class PersimmonModel(nn.Module):
                 else:
                     offset = 0
                 mask_shape = attention_mask.shape
-                mask_slice = (attention_mask == 0.0).to(dtype=dtype) * min_dtype
+                mask_slice = (attention_mask == 0.0).astype(dtype) * min_dtype
                 causal_mask[
                     : mask_shape[0],
                     : mask_shape[1],
