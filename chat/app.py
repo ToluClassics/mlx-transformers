@@ -4,7 +4,7 @@ import time
 
 import mlx.core as mx
 import streamlit as st
-from mlx_transformers.models import Phi3ForCausalLM, OpenELMForCausalLM
+from mlx_transformers.models import Phi3ForCausalLM
 from transformers import AutoConfig, AutoTokenizer
 import argparse
 from typing import Tuple, Any
@@ -14,8 +14,6 @@ ver = "0.1.0"
 debug = False
 
 MODEL_2_CLASS = {
-    "apple-OpenELM-1_1B-Instruct": OpenELMForCausalLM,
-    "apple-OpenELM-3B-Instruct": OpenELMForCausalLM,
     "microsoft-Phi-3-mini-128k-instruct": Phi3ForCausalLM,
     "microsoft-Phi-3-mini-4k-instruct": Phi3ForCausalLM,
 }
@@ -55,25 +53,18 @@ def generate(the_prompt, the_model):
     tokens = []
     skip = 0
 
-    # for (token, prob), n in zip(generate_step(mx.array(tokenizer.encode(the_prompt)), the_model, temperature),
-    #                             range(context_length)):
-
-    print(the_prompt)
-
     inputs = tokenizer(the_prompt, return_tensors="np", truncation=True)
     inputs = {key: mx.array(v) for key, v in inputs.items()}
 
     for token, n in zip(
-        the_model.generate(inputs, max_length=256, temp=temperature),
+        the_model.generate(inputs, max_length=2048, temp=temperature),
         range(context_length),
     ):
-        print(token)
-
         if token == tokenizer.eos_token_id:
             break
 
         tokens.append(token.item())
-        text = tokenizer.decode(tokens)
+        text = tokenizer.decode(tokens, skip_special_tokens=True)
 
         trim = None
 
@@ -193,14 +184,26 @@ model_ref = st.sidebar.selectbox(
 if model_ref.strip() != "-":
     model, tokenizer = load_model_and_cache(model_ref)
 
-    chat_template = tokenizer.chat_template or (
-        "{% for message in messages %}"
-        "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}"
-        "{% endfor %}"
-        "{% if add_generation_prompt %}"
-        "{{ '<|im_start|>assistant\n' }}"
-        "{% endif %}"
-    )
+    if "openelm" in model_ref.lower():
+        chat_template = (
+            "{% for message in messages %}"
+            "{{'<s>' + message['role'] + '\n' + message['content'] + '</s>' + '\n'}}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}"
+            "{{ '<s>assistant\n' }}"
+            "{% endif %}"
+        )
+        tokenizer.chat_template = chat_template
+    else:
+        chat_template = tokenizer.chat_template or (
+            "{% for message in messages %}"
+            "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}"
+            "{{ '<|im_start|>assistant\n' }}"
+            "{% endif %}"
+        )
+
     supports_system_role = "system role not supported" not in chat_template.lower()
 
     system_prompt = st.sidebar.text_area(
