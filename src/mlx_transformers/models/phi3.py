@@ -96,7 +96,7 @@ class Phi3SuScaledRotaryEmbedding(Phi3RotaryEmbedding):
 
         self.inv_freq = 1.0 / (
             ext_factors
-            * (self.base ** (mx.arange(0, self.dim, 2).float().to(x.device) / self.dim))
+            * (self.base ** (mx.arange(0, self.dim, 2).astype(mx.float32) / self.dim))
         )
         inv_freq_expanded = self.inv_freq[None, :, None].astype(mx.float32)
         inv_freq_expanded = mx.broadcast_to(
@@ -144,7 +144,7 @@ class Phi3YarnScaledRotaryEmbedding(Phi3RotaryEmbedding):
 
         self.inv_freq = 1.0 / (
             ext_factors
-            * (self.base ** (mx.arange(0, self.dim, 2).float().to(x.device) / self.dim))
+            * (self.base ** (mx.arange(0, self.dim, 2).astype(mx.float32) / self.dim))
         )
         inv_freq_expanded = self.inv_freq[None, :, None].astype(mx.float32)
         inv_freq_expanded = mx.broadcast_to(

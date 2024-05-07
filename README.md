@@ -26,6 +26,22 @@ which can be super useful for monitoring the GPU and CPU usage on Apple Silicon 
 - Machine Translation Models (NLLB, M2M-100)
 - Encoder Models (Bert, RoBERTa, XLMRoberta, Sentence Transformers)
 
+## Chat Interface
+
+MLX Transformers provides a streamlit chat interface that can be used to interact with the models.
+This template was adopted from https://github.com/da-z/mlx-ui.
+
+The chat interface is available in the `mlx_transformers/chat` module and can be used as follows:
+
+```bash
+- cd chat
+- bash start.sh
+```
+
+[image](images/mlx_transformer_chat.png)
+
+
+
 ## Quick Tour
 
 A list of the available models can be found in the `mlx_transformers.models` module and are also listed in the [section below](#available-model-architectures). The following example demonstrates how to load a model and use it for inference:
