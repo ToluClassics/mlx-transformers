@@ -124,7 +124,8 @@ The `examples` directory contains a few examples that demonstrate how to use the
 
 ## Benchmarks
 
-Coming soon...
+A comprehensive benchmark of Apple's MLX operations and layers has been conducted by [mlx-benchmark](https://github.com/TristanBilot/mlx-benchmark). The benchmark was computed across all Apple Silicon devices and some GPUs. You can find their detailed benchmark results [here](https://github.com/TristanBilot/mlx-benchmark/blob/main/benchmarks/detailed_benchmark.md).
+
 
 ## Contributions
 
