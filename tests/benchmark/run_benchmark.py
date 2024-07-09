@@ -2,10 +2,14 @@ import time
 import numpy as np
 import mlx.core as mx
 from transformers import (
-    AutoConfig,
-    AutoTokenizer,
+    BertConfig,
+    BertTokenizer,
     BertForMaskedLM,
+    RobertaConfig,
+    RobertaTokenizer,
     RobertaModel,
+    XLMRobertaConfig,
+    XLMRobertaTokenizer,
     XLMRobertaModel,
 )
 
@@ -147,24 +151,24 @@ if __name__ == "__main__":
         {
             'name': 'bert-base-uncased',
             'hgf_class': BertForMaskedLM,
-            'tokenizer_class': AutoTokenizer,
-            'config_class': AutoConfig,
+            'tokenizer_class': BertTokenizer,
+            'config_class': BertConfig,
             'mlx_class': MlxBertForMaskedLM,
             'input_text': 'This is a sample input text for BERT model.'
         },
         {
             'name': 'roberta-base',
             'hgf_class': RobertaModel,
-            'tokenizer_class': AutoTokenizer,
-            'config_class': AutoConfig,
+            'tokenizer_class': RobertaTokenizer,
+            'config_class': RobertaConfig,
             'mlx_class': MlxRobertaModel,
             'input_text': 'This is a sample input text for RoBERTa model.'
         },
         {
             'name': 'xlm-roberta-base',
             'hgf_class': XLMRobertaModel,
-            'tokenizer_class': AutoTokenizer,
-            'config_class': AutoConfig,
+            'tokenizer_class': XLMRobertaTokenizer,
+            'config_class': XLMRobertaConfig,
             'mlx_class': MlxXLMRobertaModel,
             'input_text': 'This is a sample input text for XLM-RoBERTa model.'
         }
