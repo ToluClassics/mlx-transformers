@@ -1,0 +1,89 @@
+Average Inference Times
+==================================================
+Model: bert-base-uncased
+Torch Inference Time: 0.069158 seconds
+MLX Inference Time: 0.000658 seconds
+--------------------------------------------------
+Model: roberta-base
+Torch Inference Time: 0.045344 seconds
+MLX Inference Time: 0.000524 seconds
+--------------------------------------------------
+Model: xlm-roberta-base
+Torch Inference Time: 0.051754 seconds
+MLX Inference Time: 0.000693 seconds
+--------------------------------------------------
+
+Detailed Inference Times
+==================================================
+Model: bert-base-uncased
+Torch Inference Times:
+  Run 1: 0.326954 seconds
+  Run 2: 0.041582 seconds
+  Run 3: 0.040046 seconds
+  Run 4: 0.040310 seconds
+  Run 5: 0.041010 seconds
+  Run 6: 0.041446 seconds
+  Run 7: 0.040115 seconds
+  Run 8: 0.040092 seconds
+  Run 9: 0.040779 seconds
+  Run 10: 0.039241 seconds
+MLX Inference Times:
+  Run 1: 0.003073 seconds
+  Run 2: 0.000482 seconds
+  Run 3: 0.000388 seconds
+  Run 4: 0.000376 seconds
+  Run 5: 0.000374 seconds
+  Run 6: 0.000376 seconds
+  Run 7: 0.000375 seconds
+  Run 8: 0.000381 seconds
+  Run 9: 0.000376 seconds
+  Run 10: 0.000379 seconds
+--------------------------------------------------
+Model: roberta-base
+Torch Inference Times:
+  Run 1: 0.117352 seconds
+  Run 2: 0.036606 seconds
+  Run 3: 0.038481 seconds
+  Run 4: 0.038497 seconds
+  Run 5: 0.036959 seconds
+  Run 6: 0.035942 seconds
+  Run 7: 0.039857 seconds
+  Run 8: 0.038483 seconds
+  Run 9: 0.035619 seconds
+  Run 10: 0.035641 seconds
+MLX Inference Times:
+  Run 1: 0.001710 seconds
+  Run 2: 0.000483 seconds
+  Run 3: 0.000398 seconds
+  Run 4: 0.000383 seconds
+  Run 5: 0.000384 seconds
+  Run 6: 0.000384 seconds
+  Run 7: 0.000371 seconds
+  Run 8: 0.000378 seconds
+  Run 9: 0.000375 seconds
+  Run 10: 0.000372 seconds
+--------------------------------------------------
+Model: xlm-roberta-base
+Torch Inference Times:
+  Run 1: 0.157705 seconds
+  Run 2: 0.040290 seconds
+  Run 3: 0.038780 seconds
+  Run 4: 0.038704 seconds
+  Run 5: 0.039249 seconds
+  Run 6: 0.038703 seconds
+  Run 7: 0.039542 seconds
+  Run 8: 0.044507 seconds
+  Run 9: 0.038348 seconds
+  Run 10: 0.041716 seconds
+MLX Inference Times:
+  Run 1: 0.003350 seconds
+  Run 2: 0.000425 seconds
+  Run 3: 0.000394 seconds
+  Run 4: 0.000385 seconds
+  Run 5: 0.000391 seconds
+  Run 6: 0.000391 seconds
+  Run 7: 0.000410 seconds
+  Run 8: 0.000393 seconds
+  Run 9: 0.000399 seconds
+  Run 10: 0.000396 seconds
+--------------------------------------------------
