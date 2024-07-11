@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import mlx.core as mx
 import argparse
+from tqdm import tqdm
 from collections import defaultdict
 from utils import *
 from transformers import (
@@ -23,6 +24,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.mlx_transformers.models import BertForMaskedLM as MlxBertForMaskedLM
 from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
 from src.mlx_transformers.models import XLMRobertaModel as MlxXLMRobertaModel
+
 
 
 class Model:
@@ -63,16 +65,16 @@ class Model:
 
 
 class Benchmark:
-    def __init__(self, models, backends, corpus=corpus,  num_runs=5, input_lengths=[50, 100, 200, 500, 1000]):
+    def __init__(self, models, backends, batch_sizes=[1, 16, 32],  iterations=5, input_lengths=[50, 100, 200, 500, 1000]):
         self.models = models
         self.backends = backends
-        self.corpus=corpus
-        self.num_runs = num_runs
+        self.batch_sizes=batch_sizes
+        self.iterations = iterations
         self.input_lengths = input_lengths
 
     def measure_inference_time(self, model, inputs, inference_func, backend):
         times = []
-        for _ in range(self.num_runs):
+        for _ in range(self.iterations):
             start_time = time.time()
             _ = inference_func(model, inputs)
             end_time = time.time()
@@ -86,6 +88,8 @@ class Benchmark:
     def run_benchmark(self):
         detailed_results = []
         average_results = []
+        average_results_wrt_input_length = []
+        average_results_wrt_batch_size = []
 
         for model_info in self.models:
             model_instance = Model(
@@ -98,57 +102,64 @@ class Benchmark:
 
             mlx_model = model_instance.load_mlx_model()
             for input_length in self.input_lengths:
-                input_text = get_input_text(self.corpus, input_length)
+                for batch_size in self.batch_sizes:
+                    input_text = generate_inputs(input_length, batch_size)
 
-                for backend in self.backends:
-                    if backend == "mlx_cpu":
-                        mx.set_default_device(mx.cpu)
-                        inputs_mlx = model_instance.prepare_mlx_model_input(input_text)
-                        mlx_inference_times = self.measure_inference_time(mlx_model, inputs_mlx, model_instance.get_mlx_model_inference, backend)
-                    elif backend == "mlx_gpu":
-                        mx.set_default_device(mx.gpu)
-                        inputs_mlx = model_instance.prepare_mlx_model_input(input_text)
-                        mlx_inference_times = self.measure_inference_time(mlx_model, inputs_mlx, model_instance.get_mlx_model_inference, backend)
-                    elif backend == "mlx_gpu_compile":
-                        mx.set_default(mx.gpu)
-                        mx.compile()
-                        inputs_mlx = model_instance.prepare_mlx_model_input(input_text)
-                        mlx_model.compile()
-                        mlx_inference_times = self.measure_inference_time(mlx_model, inputs_mlx, model_instance.get_mlx_model_inference, backend)
-                    elif backend == "torch_cpu":
-                        device = torch.device("cpu")
-                        hgf_model = model_instance.load_hgf_model(device)
-                        inputs_hgf = model_instance.prepare_hgf_model_input(input_text, device)
-                        hgf_inference_times = self.measure_inference_time(hgf_model, inputs_hgf, model_instance.get_hgf_model_inference, backend)
-                    elif backend == "torch_cuda":
-                        if torch.cuda.is_available():
-                            device = torch.device("cuda")
+
+                    for backend in self.backends:
+                        tqdm.write(f"------ Running {model_info['name']} on {backend} with {input_length} chars and batch size {batch_size}... ------")
+                        
+                        if backend == "mlx_cpu":
+                            mx.set_default_device(mx.cpu)
+                            inputs_mlx = model_instance.prepare_mlx_model_input(input_text)
+                            mlx_inference_times = self.measure_inference_time(mlx_model, inputs_mlx, model_instance.get_mlx_model_inference, backend)
+                        elif backend == "mlx_gpu":
+                            mx.set_default_device(mx.gpu)
+                            inputs_mlx = model_instance.prepare_mlx_model_input(input_text)
+                            mlx_inference_times = self.measure_inference_time(mlx_model, inputs_mlx, model_instance.get_mlx_model_inference, backend)
+                        elif backend == "mlx_gpu_compile":
+                            mx.set_default(mx.gpu)
+                            mx.compile()
+                            inputs_mlx = model_instance.prepare_mlx_model_input(input_text)
+                            mlx_model.compile()
+                            mlx_inference_times = self.measure_inference_time(mlx_model, inputs_mlx, model_instance.get_mlx_model_inference, backend)
+                        elif backend == "torch_cpu":
+                            device = torch.device("cpu")
                             hgf_model = model_instance.load_hgf_model(device)
                             inputs_hgf = model_instance.prepare_hgf_model_input(input_text, device)
                             hgf_inference_times = self.measure_inference_time(hgf_model, inputs_hgf, model_instance.get_hgf_model_inference, backend)
-                        else:
-                            hgf_inference_times = [float('nan')] * self.num_runs
-                    elif backend == "torch_mps":
-                        if torch.backends.mps.is_available():
-                            device = torch.device("mps")
-                            hgf_model = model_instance.load_hgf_model(device)
-                            inputs_hgf = model_instance.prepare_hgf_model_input(input_text, device)
-                            hgf_inference_times = self.measure_inference_time(hgf_model, inputs_hgf, model_instance.get_hgf_model_inference, backend)
-                        else:
-                            hgf_inference_times = [float('nan')] * self.num_runs
+                        elif backend == "torch_cuda":
+                            if torch.cuda.is_available():
+                                device = torch.device("cuda")
+                                hgf_model = model_instance.load_hgf_model(device)
+                                inputs_hgf = model_instance.prepare_hgf_model_input(input_text, device)
+                                hgf_inference_times = self.measure_inference_time(hgf_model, inputs_hgf, model_instance.get_hgf_model_inference, backend)
+                            else:
+                                hgf_inference_times = [float('nan')] * self.iterations
+                        elif backend == "torch_mps":
+                            if torch.backends.mps.is_available():
+                                device = torch.device("mps")
+                                hgf_model = model_instance.load_hgf_model(device)
+                                inputs_hgf = model_instance.prepare_hgf_model_input(input_text, device)
+                                hgf_inference_times = self.measure_inference_time(hgf_model, inputs_hgf, model_instance.get_hgf_model_inference, backend)
+                            else:
+                                hgf_inference_times = [float('nan')] * self.iterations
 
-                    result = {
-                        'model': model_info['name'],
-                        'backend': backend,
-                        'input_length': input_length,
-                        'average_time': np.mean(hgf_inference_times if 'torch' in backend else mlx_inference_times)
-                    }
+                        result = {
+                            'model': model_info['name'],
+                            'backend': backend,
+                            'input_length': input_length,
+                            'batch_size': batch_size,
+                            'average_time': np.mean(hgf_inference_times if 'torch' in backend else mlx_inference_times)
+                        }
 
-                    detailed_results.append(result)
-        
+                        detailed_results.append(result)
+
+
         # Calculate average results
         for model_info in self.models:
             for backend in self.backends:
+                # Overall average time
                 average_time = np.mean([
                     res['average_time'] for res in detailed_results
                     if res['model'] == model_info['name'] and res['backend'] == backend
@@ -158,18 +169,65 @@ class Benchmark:
                     'backend': backend,
                     'average_time': average_time
                 })
-        
-        self.save_results(detailed_results, average_results)
 
-    def save_results(self, detailed_results, average_results):
+                # Average time wrt batch size
+                for input_length in self.input_lengths:
+                    average_time_wrt_batch_size = np.mean([
+                        res['average_time'] for res in detailed_results
+                        if res['model'] == model_info['name'] and res['backend'] == backend and res['input_length'] == input_length
+                    ])
+                    average_results_wrt_batch_size.append({
+                        'model': model_info['name'],
+                        'backend': backend,
+                        'input_length': input_length,
+                        'average_time': average_time_wrt_batch_size
+                    })
+
+                # Average time wrt input length
+                for batch_size in self.batch_sizes:
+                    average_time_wrt_input_lenght = np.mean([
+                        res['average_time'] for res in detailed_results
+                        if res['model'] == model_info['name'] and res['backend'] == backend and res['batch_size'] == batch_size
+                    ])
+                    average_results_wrt_input_length.append({
+                        'model': model_info['name'],
+                        'backend': backend,
+                        'batch_size': batch_size,
+                        'average_time': average_time_wrt_input_lenght
+                    })
+        
+        self.save_results(
+            detailed_results, 
+            average_results,
+            average_results_wrt_input_length,
+            average_results_wrt_batch_size
+        )
+
+    def save_results(
+            self, 
+            detailed_results, 
+            average_results,
+            average_results_wrt_batch_size,
+            average_results_wrt_input_length
+        ):
         backends = list(set(result['backend'] for result in detailed_results))
         
         detailed_times = defaultdict(dict)
         average_times = defaultdict(dict)
+        average_times_wrt_batch_size = defaultdict(dict)
+        average_times_wrt_input_length = defaultdict(dict)
 
         for result in detailed_results:
-            model_info = f"{result['model']} / inputs_char_no={result['input_length']}"
+            model_info = f"{result['model']} / inputs_char_no={result['input_length']} / batch_size={result['batch_size']}"
             detailed_times[model_info][result['backend']] = result['average_time']
+
+        for result in average_results_wrt_input_length:
+            model_info = f"{result['model']} / inputs_char_no={result['input_length']}"
+            average_times_wrt_input_length[model_info][result['backend']] = result['average_time']
+        
+        for result in average_results_wrt_batch_size:
+            model_info = f"{result['model']} / batch_size={result['batch_size']}"
+            average_times_wrt_batch_size[model_info][result['backend']] = result['average_time']
 
         for result in average_results:
             model_info = result['model']
@@ -181,6 +239,20 @@ class Benchmark:
             
             f.write("### Detailed Results\n")
             output = print_benchmark(detailed_times, backends)
+            f.write(output)
+
+            f.write("\n## Average Benchmark of Input Lengths\n")
+            f.write("Average runtime benchmark of model inferences with respect to input length, measured in milliseconds.\n\n")
+            
+            f.write("### Average Results wrt Input Length\n")
+            output = print_benchmark(average_times_wrt_input_length, backends)
+            f.write(output)
+
+            f.write("\n## Average Benchmark of Batch Sizes\n")
+            f.write("Average runtime benchmark of model inferences with respect to batch size, measured in milliseconds.\n\n")
+            
+            f.write("### Average Results wrt Batch Size\n")
+            output = print_benchmark(average_times_wrt_batch_size, backends)
             f.write(output)
 
             f.write("\n## Average Benchmark\n")
@@ -195,7 +267,10 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark model inferences on different backends.")
     parser.add_argument("--backends", nargs="+", default=["mlx_cpu", "mlx_gpu", "torch_cpu"],
                         help="List of backends to benchmark on. E.g., --backends mlx_cpu mlx_gpu torch_cpu torch_cuda torch_mps")
-    parser.add_argument('--num_runs', type=int, default=10, help='Number of runs for each benchmark')
+    parser.add_argument('--iterations', type=int, default=10, help='Number of runs for each benchmark')
+    parser.add_argument("--input_lengths", nargs="+", type=int, default=[50, 100, 200, 500], help="List of input character lengths.")
+    parser.add_argument("--batch_sizes", nargs="+", type=int, default=[1, 16, 32], help="List of batch sizes.")
+    
     args = parser.parse_args()
 
 
@@ -229,7 +304,13 @@ def main():
         }
     ]
 
-    benchmark = Benchmark(models=models, backends=args.backends, num_runs=args.num_runs)
+    benchmark = Benchmark(
+        models=models, 
+        backends=args.backends, 
+        iterations=args.iterations, 
+        input_lengths=args.input_lengths, 
+        batch_sizes=args.batch_sizes
+    )
     benchmark.run_benchmark()
 
 if __name__ == "__main__":

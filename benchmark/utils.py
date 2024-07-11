@@ -3,32 +3,26 @@ import math
 import random
 import numpy as np
 from collections import defaultdict
+from datasets import load_dataset
 
 
 
-corpus = [
-    "The quick brown fox jumps over the lazy dog.",
-    "Artificial intelligence is transforming the world.",
-    "Natural language processing is a field of artificial intelligence.",
-    "Machine learning models require a lot of data.",
-    "Deep learning is a subset of machine learning.",
-    "Supervised learning relies on labeled data for training.",
-    "Unsupervised learning can discover hidden patterns in data.",
-    "Reinforcement learning involves agents learning from their environment.",
-    "Neural networks are inspired by the human brain.",
-    "Convolutional neural networks are effective for image recognition.",
-    "Recurrent neural networks are suitable for sequence data.",
-    "Transfer learning allows models to leverage pre-trained knowledge.",
-    "Hyperparameter tuning is crucial for optimizing model performance.",
-    "Gradient descent is an optimization algorithm used in training.",
-    "Overfitting occurs when a model performs well on training data but poorly on new data.",
-    "Cross-validation helps to evaluate model performance more reliably.",
-    "Data augmentation techniques can improve model robustness.",
-    "The Turing Test assesses a machine's ability to exhibit intelligent behavior.",
-    "Ethics in AI is a critical area of research and development.",
-    "Generative adversarial networks can create realistic synthetic data."
-]
+def get_dataset(dataset_name="castorini/wura"):
+    """
+    Load the dataset from Hugging Face
+    """
+    dataset = load_dataset(dataset_name, "yor", level="passage", verification_mode="no_checks")
+    return dataset
 
+def generate_inputs(char_length, batch_size, dataset=get_dataset()):
+        inputs = []
+        for i in range(batch_size):
+            input_text = dataset["train"][i]['text']
+            input_text = input_text[:char_length]  
+            if len(input_text) < char_length:
+                input_text = input_text.ljust(char_length)  
+            inputs.append(input_text)
+        return inputs
 
 def get_input_text(corpus, char_length):
     """
