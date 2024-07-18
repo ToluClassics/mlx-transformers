@@ -11,7 +11,7 @@ def get_dataset(dataset_name="castorini/wura"):
     """
     Load the dataset from Hugging Face
     """
-    dataset = load_dataset(dataset_name, "yor", level="passage", verification_mode="no_checks")
+    dataset = load_dataset(dataset_name, "eng", level="passage", verification_mode="no_checks")
     return dataset
 
 def generate_inputs(char_length, batch_size, dataset=get_dataset()):
@@ -75,6 +75,12 @@ def print_benchmark(times, backends, reduce_mean=False):
         headers.append(h)
         for k, v in times.items():
             v[h] = calculate_speedup(v["mlx_gpu"], compared_to=v["mlx_cpu"])
+
+    if "mlx_cpu" in backends and "torch_cpu" in backends:
+        h = "mlx_cpu/torch_cpu speedup"
+        headers.append(h)
+        for k, v in times.items():
+            v[h] = calculate_speedup(v["mlx_cpu"], compared_to=v["torch_cpu"])
 
     if "torch_cpu" in backends and "torch_cuda" in backends:
         h = "torch_cuda/torch_cpu speedup"
