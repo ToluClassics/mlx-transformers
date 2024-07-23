@@ -66,7 +66,7 @@ def load_mlx_nllb_model(
         model_name, src_lang=source_language, tgt_lang=target_language
     )
 
-    tgt_token_id = tokenizer.convert_tokens_to_ids("yor_Latn")
+    tgt_token_id = tokenizer.convert_tokens_to_ids(target_language)
     return model, tokenizer, tgt_token_id
 
 
