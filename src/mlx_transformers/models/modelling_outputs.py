@@ -96,3 +96,64 @@ class MaskedLMOutput:
     logits: mx.array = None
     hidden_states: Optional[Tuple[mx.array, ...]] = None
     attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class CLIPVisionModelOutput:
+    image_embeds: Optional[mx.array] = None
+    last_hidden_state: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class CLIPTextModelOutput:
+    text_embeds: Optional[mx.array] = None
+    last_hidden_state: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class BaseModelOutputWithPooling:
+    last_hidden_state: mx.array = None
+    pooler_output: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class CLIPOutput:
+    loss: Optional[mx.array] = None
+    logits_per_image: mx.array = None
+    logits_per_text: mx.array = None
+    text_embeds: mx.array = None
+    image_embeds: mx.array = None
+    text_model_output: BaseModelOutputWithPooling = None
+    vision_model_output: BaseModelOutputWithPooling = None
+
+    def to_tuple(self) -> Tuple[Any]:
+        return tuple(
+            (
+                self[k]
+                if k not in ["text_model_output", "vision_model_output"]
+                else getattr(self, k).to_tuple()
+            )
+            for k in self.keys()
+        )
+
+
+@dataclass
+class BaseModelOutput:
+    last_hidden_state: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
+
+
+@dataclass
+class ImageClassifierOutput:
+
+    loss: Optional[mx.array] = None
+    logits: mx.array = None
+    hidden_states: Optional[Tuple[mx.array, ...]] = None
+    attentions: Optional[Tuple[mx.array, ...]] = None
