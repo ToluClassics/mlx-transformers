@@ -87,7 +87,6 @@ class TestMlxXLMRoberta(unittest.TestCase):
 
 
 class TestMlxXLMRobertaForSequenceClassification(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "cardiffnlp/twitter-roberta-base-emotion"
@@ -131,7 +130,6 @@ class TestMlxXLMRobertaForSequenceClassification(unittest.TestCase):
 
 
 class TestMlxXLMRobertaForTokenClassification(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "Jean-Baptiste/roberta-large-ner-english"
@@ -193,7 +191,6 @@ class TestMlxXLMRobertaForTokenClassification(unittest.TestCase):
 
 
 class TestMlxXLMRobertaForQuestionAnswering(unittest.TestCase):
-
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "deepset/roberta-base-squad2"
