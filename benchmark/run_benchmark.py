@@ -59,7 +59,9 @@ class Model:
         return inputs_hgf
     
     def get_mlx_model_inference(self, model, inputs_mlx):
-        return model(**inputs_mlx)
+            output = model(**inputs_mlx)
+            _ = np.array(output.logits)
+        return output
 
     def get_hgf_model_inference(self, model, inputs_hgf):
         return model(**inputs_hgf)
@@ -84,7 +86,7 @@ class Benchmark:
         if backend in ["cuda", "mps"]:
             torch.cuda.empty_cache()
         
-        return times
+        return times[1:]
 
     def run_benchmark(self):
         detailed_results = []
@@ -268,7 +270,7 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark model inferences on different backends.")
     parser.add_argument("--backends", nargs="+", default=["mlx_cpu", "mlx_gpu", "torch_cpu"],
                         help="List of backends to benchmark on. E.g., --backends mlx_cpu mlx_gpu torch_cpu torch_cuda torch_mps")
-    parser.add_argument('--iterations', type=int, default=10, help='Number of runs for each benchmark')
+    parser.add_argument('--iterations', type=int, default=11, help='Number of runs for each benchmark')
     parser.add_argument("--input_lengths", nargs="+", type=int, default=[50, 100, 200, 500], help="List of input character lengths.")
     parser.add_argument("--batch_sizes", nargs="+", type=int, default=[1, 16, 32], help="List of batch sizes.")
     
