@@ -59,8 +59,12 @@ class Model:
         return inputs_hgf
     
     def get_mlx_model_inference(self, model, inputs_mlx):
+        if model.config.architectures == ['BertForMaskedLM']:
             output = model(**inputs_mlx)
             _ = np.array(output.logits)
+        else:
+            output = model(**inputs_mlx)
+            _ = np.array(output.last_hidden_state)
         return output
 
     def get_hgf_model_inference(self, model, inputs_hgf):
