@@ -32,4 +32,4 @@ class TestMlxPhi3(unittest.TestCase):
         inputs = {key: mx.array(v) for key, v in inputs.items()}
         outputs = self.model(**inputs, use_cache=True)
 
-        assert type(outputs.logits) == mx.array
+        assert type(outputs.logits) is mx.array
