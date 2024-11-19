@@ -85,7 +85,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-name",
         help="The model name to load",
-        default="meta-llama/Llama-2-7b-hf",
+        default="meta-llama/Llama-3.2-3B-Instruct",
     )
     parser.add_argument(
         "--prompt",

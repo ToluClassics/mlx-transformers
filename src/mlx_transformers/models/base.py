@@ -7,7 +7,7 @@ from huggingface_hub import snapshot_download
 from huggingface_hub import HfFileSystem
 
 import mlx.core as mx
-from mlx.utils import tree_unflatten
+from mlx.utils import tree_unflatten, tree_flatten
 
 logger = logging.getLogger(__name__)
 fs = HfFileSystem()
@@ -92,6 +92,13 @@ class MlxPretrainedMixin:
             tensors.update(state_dict)
 
         tensors = {k: v.astype(dtype) for k, v in tensors.items()}
+
+        if self.config.tie_word_embeddings:
+            #TODO: Add support for tying embeddings
+            missing_keys = set([param[0] for param in tree_flatten(self.parameters())]) - set(tensors.keys())
+
+            if "lm_head.weight" in missing_keys:
+                tensors["lm_head.weight"] = tensors["model.embed_tokens.weight"]
 
         # Update model weights
         self.update(tree_unflatten(list(tensors.items())))

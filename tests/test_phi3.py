@@ -20,7 +20,6 @@ class TestMlxPhi3(unittest.TestCase):
         cls.model = MlxPhi3ForCausalLM(config)
         cls.model.from_pretrained(
             cls.model_name,
-            huggingface_model_architecture="AutoModelForCausalLM",
             trust_remote_code=True,
         )
 
