@@ -12,6 +12,7 @@ from .modelling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
 )
+from .modeling_rope_utils import ROPE_INIT_FUNCTIONS
 from .utils import ACT2FN
 
 
@@ -36,28 +37,43 @@ class LlamaRMSNorm(nn.Module):
 class LlamaRotaryEmbedding(nn.Module):
     def __init__(
         self,
-        dim,
+        dim=None,
         max_position_embeddings=2048,
         base=10000,
         device=None,
         scaling_factor=1.0,
+        rope_type="default",
+        config: Optional[LlamaConfig] = None,
     ):
         super().__init__()
-        self.scaling_factor = scaling_factor
-        self.dim = dim
-        self.max_position_embeddings = max_position_embeddings
-        self.base = base
 
-        self.inv_freq = 1.0 / (
-            self.base ** (mx.arange(0, self.dim, 2, dtype=mx.int64) / self.dim)
-        )
-        self.max_seq_len_cached = max_position_embeddings
+        self.rope_kwargs = {}
 
-        t = mx.arange(self.max_seq_len_cached).astype(mx.int64)
-        t = t / self.scaling_factor
-        freqs = mx.outer(t, self.inv_freq)
+        if config is None:
+            self.rope_kwargs = {
+                "rope_type": rope_type,
+                "factor": scaling_factor,
+                "dim": dim,
+                "base": base,
+                "max_position_embeddings": max_position_embeddings,
+            }
+            self.rope_type = rope_type
+            self.max_seq_len_cached = max_position_embeddings
+            self.original_max_seq_len = max_position_embeddings
+        else:
+            if config.rope_scaling is not None:
+                self.rope_type = config.rope_scaling.get("rope_type", config.rope_scaling.get("type"))
+            else:
+                self.rope_type = "default"
+            self.max_seq_len_cached = config.max_position_embeddings
+            self.original_max_seq_len = config.max_position_embeddings
 
-        mx.concatenate([freqs, freqs], axis=-1)
+        self.config = config
+        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
+
+        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device, **self.rope_kwargs)
+        self.inv_freq = inv_freq
+        self.original_inv_freq = inv_freq
 
     def __call__(self, x, position_ids):
         inv_freq_expanded = self.inv_freq[None, :, None].astype(mx.float32)
@@ -180,34 +196,8 @@ class LlamaAttention(nn.Module):
         self.o_proj = nn.Linear(
             self.hidden_size, self.hidden_size, bias=config.attention_bias
         )
-        self._init_rope()
 
-    def _init_rope(self):
-        if self.config.rope_scaling is None:
-            self.rotary_emb = LlamaRotaryEmbedding(
-                self.head_dim,
-                max_position_embeddings=self.max_position_embeddings,
-                base=self.rope_theta,
-            )
-        else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
-            if scaling_type == "linear":
-                self.rotary_emb = LlamaLinearScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                )
-            elif scaling_type == "dynamic":
-                self.rotary_emb = LlamaDynamicNTKScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                )
-            else:
-                raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+        self.rotary_emb = LlamaRotaryEmbedding(config=self.config)
 
     def __call__(
         self,
@@ -511,6 +501,7 @@ class LlamaModel(nn.Module):
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
+                
 
         hidden_states = self.norm(hidden_states)
 
@@ -646,6 +637,7 @@ class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
         output_hidden_states=None,
         return_dict=None,
         cache_position=None,
+        num_logits_to_keep: int = 0,
     ):
         output_attentions = (
             output_attentions
@@ -690,7 +682,7 @@ class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
         )
 
         hidden_states = outputs.last_hidden_state
-        logits = self.lm_head(hidden_states)
+        logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :])
 
         logits = logits.astype(mx.float32)
         loss = None

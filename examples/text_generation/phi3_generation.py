@@ -41,7 +41,6 @@ def load_model(
     model = mlx_model_class(config)
     model.from_pretrained(
         model_name,
-        huggingface_model_architecture="AutoModelForCausalLM",
         trust_remote_code=True,
         float16=fp16,
     )
