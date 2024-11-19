@@ -9,8 +9,6 @@ from transformers import (
     XLMRobertaForQuestionAnswering,
     XLMRobertaForSequenceClassification,
     XLMRobertaForTokenClassification,
-    XLMRobertaModel,
-    XLMRobertaTokenizer,
 )
 
 from src.mlx_transformers.models import (
