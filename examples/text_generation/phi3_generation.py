@@ -43,7 +43,7 @@ def load_model(
         model_name,
         huggingface_model_architecture="AutoModelForCausalLM",
         trust_remote_code=True,
-        fp16=fp16,
+        float16=fp16,
     )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)

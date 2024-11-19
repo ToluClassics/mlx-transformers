@@ -39,7 +39,7 @@ def load_model(
     os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
-    model.from_pretrained(model_name, fp16=fp16)
+    model.from_pretrained(model_name, float16=fp16)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
