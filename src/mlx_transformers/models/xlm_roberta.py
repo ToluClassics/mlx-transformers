@@ -210,9 +210,9 @@ class XLMRobertaAttention(nn.Module):
             output_attentions,
         )
         attention_output = self.output(self_outputs[0], hidden_states)
-        outputs = (attention_output,) + self_outputs[
-            1:
-        ]  # add attentions if we output them
+        outputs = (
+            attention_output,
+        ) + self_outputs[1:]  # add attentions if we output them
         return outputs
 
 
@@ -425,6 +425,7 @@ class XLMRobertaModel(nn.Module, MlxPretrainedMixin):
             position_ids=position_ids,
             token_type_ids=token_type_ids,
         )
+
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
@@ -507,6 +508,7 @@ class XLMRobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+
         sequence_output = outputs.last_hidden_state
         logits = self.classifier(sequence_output)
 

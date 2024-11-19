@@ -195,13 +195,16 @@ if model_ref.strip() != "-":
         )
         tokenizer.chat_template = chat_template
     else:
-        chat_template = tokenizer.chat_template or (
-            "{% for message in messages %}"
-            "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}"
-            "{% endfor %}"
-            "{% if add_generation_prompt %}"
-            "{{ '<|im_start|>assistant\n' }}"
-            "{% endif %}"
+        chat_template = (
+            tokenizer.chat_template
+            or (
+                "{% for message in messages %}"
+                "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}"
+                "{% endfor %}"
+                "{% if add_generation_prompt %}"
+                "{{ '<|im_start|>assistant\n' }}"
+                "{% endif %}"
+            )
         )
 
     supports_system_role = "system role not supported" not in chat_template.lower()

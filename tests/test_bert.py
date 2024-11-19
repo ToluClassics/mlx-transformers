@@ -6,14 +6,14 @@ from transformers import (
     AutoConfig,
     AutoTokenizer,
     BertConfig,
-    BertForMaskedLM,
+    BertModel,
     BertForQuestionAnswering,
     BertForSequenceClassification,
     BertForTokenClassification,
     BertTokenizer,
 )
 
-from src.mlx_transformers.models import BertForMaskedLM as MlxBertForMaskedLM
+from src.mlx_transformers.models import BertModel as MlxBertModel
 from src.mlx_transformers.models import (
     BertForQuestionAnswering as MlxBertForQuestionAnswering,
 )
@@ -33,14 +33,13 @@ def load_hgf_model(model_name: str, hgf_model_class):
 class TestMlxBert(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.model_name = "bert-base-uncased"
+        cls.model_name = "sentence-transformers/all-MiniLM-L6-v2"
         cls.config = BertConfig.from_pretrained(cls.model_name)
         cls.tokenizer = BertTokenizer.from_pretrained(cls.model_name)
-        cls.hgf_model_class = BertForMaskedLM
+        cls.hgf_model_class = BertModel
 
-        # cls.model_class = MlxBertForMaskedLM
-        cls.model = MlxBertForMaskedLM(cls.config)
-        cls.model.from_pretrained(cls.model_name)
+        cls.model = MlxBertModel(cls.config)
+        cls.model.from_pretrained(cls.model_name, revision="main")
 
         cls.input_text = "Hello, my dog is cute"
 
@@ -51,14 +50,14 @@ class TestMlxBert(unittest.TestCase):
 
         inputs_mlx = {key: mx.array(v) for key, v in inputs_mlx.items()}
         outputs_mlx = self.model(**inputs_mlx)
-        outputs_mlx = np.array(outputs_mlx.logits)
+        outputs_mlx = np.array(outputs_mlx.last_hidden_state)
 
         inputs_hgf = self.tokenizer(
             self.input_text, return_tensors="pt", padding=True, truncation=True
         )
         hgf_model = load_hgf_model(self.model_name, self.hgf_model_class)
         outputs_hgf = hgf_model(**inputs_hgf)
-        outputs_hgf = outputs_hgf.logits.detach().numpy()
+        outputs_hgf = outputs_hgf.last_hidden_state.detach().numpy()
 
         self.assertTrue(np.allclose(outputs_mlx, outputs_hgf, atol=1e-4))
 
@@ -72,7 +71,7 @@ class TestMlxBertForSequenceClassification(unittest.TestCase):
 
         cls.hgf_model_class = BertForSequenceClassification
         cls.model = MlxBertForSequenceClassification(cls.config)
-        cls.model.from_pretrained(cls.model_name)
+        cls.model.from_pretrained(cls.model_name, revision="refs/pr/1")
 
         cls.input_text = "Hello, my dog is cute"
 
@@ -91,6 +90,7 @@ class TestMlxBertForSequenceClassification(unittest.TestCase):
         )
 
         inputs_mlx = {key: mx.array(v) for key, v in inputs_mlx.items()}
+
         outputs_mlx = self.model(**inputs_mlx)
         outputs_mlx = np.array(outputs_mlx.logits)
         predicted_class_id = outputs_mlx.argmax().item()
@@ -100,6 +100,7 @@ class TestMlxBertForSequenceClassification(unittest.TestCase):
             self.input_text, return_tensors="pt", padding=True, truncation=True
         )
         hgf_model = load_hgf_model(self.model_name, self.hgf_model_class)
+
         outputs_hgf = hgf_model(**inputs_hgf)
         outputs_hgf = outputs_hgf.logits
 
@@ -171,6 +172,9 @@ class TestMlxBertForTokenClassification(unittest.TestCase):
         ]
 
         self.assertEqual(mlx_predicted_tokens_classes, hgf_predicted_tokens_classes)
+        self.assertTrue(
+            np.allclose(np.array(outputs_mlx), outputs_hgf.detach().numpy(), atol=1e-4)
+        )
 
 
 class TestMlxBertForQuestionAnswering(unittest.TestCase):
@@ -232,6 +236,20 @@ class TestMlxBertForQuestionAnswering(unittest.TestCase):
         )
 
         self.assertEqual(mlx_answer, hgf_answer)
+        self.assertTrue(
+            np.allclose(
+                np.array(outputs_mlx.start_logits),
+                outputs_hgf.start_logits.detach().numpy(),
+                atol=1e-4,
+            )
+        )
+        self.assertTrue(
+            np.allclose(
+                np.array(outputs_mlx.end_logits),
+                outputs_hgf.end_logits.detach().numpy(),
+                atol=1e-4,
+            )
+        )
 
 
 if __name__ == "__main__":
