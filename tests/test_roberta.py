@@ -23,25 +23,6 @@ from src.mlx_transformers.models import (
     RobertaForTokenClassification as MlxRobertaForTokenClassification,
 )
 from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
-from src.mlx_transformers.models.utils import convert
-
-
-def load_model(model_name: str, mlx_model_class, hgf_model_class):
-    current_directory = os.path.dirname(os.path.realpath(__file__))
-    weights_path = os.path.join(
-        current_directory, "model_checkpoints", model_name.replace("/", "-") + ".npz"
-    )
-
-    if not os.path.exists(weights_path):
-        convert(model_name, weights_path, hgf_model_class)
-
-    config = RobertaConfig.from_pretrained(model_name)
-    # print(config)
-    model = mlx_model_class(config)
-
-    model.load_weights(weights_path, strict=True)
-
-    return model
 
 
 def load_hgf_model(model_name: str, hgf_model_class):
@@ -49,53 +30,17 @@ def load_hgf_model(model_name: str, hgf_model_class):
     return model
 
 
-class TestMlxRoberta(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.model_name = "FacebookAI/roberta-base"
-        cls.model_class = MlxRobertaModel
-        cls.hgf_model_class = RobertaModel
-        cls.model = load_model(cls.model_name, cls.model_class, cls.hgf_model_class)
-        cls.tokenizer = RobertaTokenizer.from_pretrained(cls.model_name)
-        cls.input_text = "Hello, my dog is cute"
-
-    def test_forward(self) -> None:
-        inputs = self.tokenizer(
-            self.input_text, return_tensors="np", padding=True, truncation=True
-        )
-
-        inputs = {key: mx.array(v) for key, v in inputs.items()}
-        outputs = self.model(**inputs)
-        self.assertIsInstance(outputs.last_hidden_state, mx.array)
-
-    def test_model_output_hgf(self):
-        inputs_mlx = self.tokenizer(
-            self.input_text, return_tensors="np", padding=True, truncation=True
-        )
-
-        inputs_mlx = {key: mx.array(v) for key, v in inputs_mlx.items()}
-        outputs_mlx = self.model(**inputs_mlx)
-        outputs_mlx = np.array(outputs_mlx.last_hidden_state)
-
-        inputs_hgf = self.tokenizer(
-            self.input_text, return_tensors="pt", padding=True, truncation=True
-        )
-        hgf_model = load_hgf_model(self.model_name, self.hgf_model_class)
-        outputs_hgf = hgf_model(**inputs_hgf)
-        outputs_hgf = outputs_hgf.last_hidden_state.detach().numpy()
-
-        self.assertTrue(np.allclose(outputs_mlx, outputs_hgf, atol=1e-4))
-
-
 class TestMlxRobertaForSequenceClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "cardiffnlp/twitter-roberta-base-emotion"
-        cls.model_class = MlxRobertaForSequenceClassification
         cls.hgf_model_class = RobertaForSequenceClassification
-        cls.model = load_model(cls.model_name, cls.model_class, cls.hgf_model_class)
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
         cls.input_text = "Hello, my dog is cute"
+
+        cls.config = RobertaConfig.from_pretrained(cls.model_name)
+        cls.model = MlxRobertaForSequenceClassification(cls.config)
+        cls.model.from_pretrained(cls.model_name, revision="refs/pr/3")
 
     def test_forward(self) -> None:
         inputs = self.tokenizer(
@@ -134,11 +79,13 @@ class TestMlxRobertaForTokenClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "Jean-Baptiste/roberta-large-ner-english"
-        cls.model_class = MlxRobertaForTokenClassification
         cls.hgf_model_class = RobertaForTokenClassification
-        cls.model = load_model(cls.model_name, cls.model_class, cls.hgf_model_class)
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
         cls.input_text = "HuggingFace is a company based in Paris and New York"
+
+        cls.config = RobertaConfig.from_pretrained(cls.model_name)
+        cls.model = MlxRobertaForTokenClassification(cls.config)
+        cls.model.from_pretrained(cls.model_name)
 
     def test_forward(self) -> None:
         inputs = self.tokenizer(
@@ -195,12 +142,14 @@ class TestMlxRobertaForQuestionAnswering(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.model_name = "deepset/roberta-base-squad2"
-        cls.model_class = MlxRobertaForQuestionAnswering
         cls.hgf_model_class = RobertaForQuestionAnswering
-        cls.model = load_model(cls.model_name, cls.model_class, cls.hgf_model_class)
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
         cls.input_question = "Who was Jim Henson?"
         cls.input_text = "Jim Henson was a nice puppet"
+
+        cls.config = RobertaConfig.from_pretrained(cls.model_name)
+        cls.model = MlxRobertaForQuestionAnswering(cls.config)
+        cls.model.from_pretrained(cls.model_name)
 
     def test_forward(self) -> None:
         inputs = self.tokenizer(

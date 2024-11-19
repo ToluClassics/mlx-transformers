@@ -74,9 +74,7 @@ class DynamicCache(Cache):
     def __init__(self) -> None:
         self.key_cache: List[mx.array] = []
         self.value_cache: List[mx.array] = []
-        self._seen_tokens = (
-            0  # Used in `generate` to keep tally of how many tokens the cache has seen
-        )
+        self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
 
     def __getitem__(self, layer_idx: int) -> List[Tuple[mx.array]]:
         """
