@@ -37,7 +37,12 @@ class TestMlxPhi3(unittest.TestCase):
 
 
 class TestMlxPhi3LocalBehavior(unittest.TestCase):
-    def _tiny_config(self, attn_implementation: str = "eager"):
+    def _tiny_config(
+        self,
+        attn_implementation: str = "eager",
+        partial_rotary_factor: float = 1.0,
+        rope_scaling=None,
+    ):
         config = Phi3Config(
             vocab_size=64,
             hidden_size=16,
@@ -48,11 +53,12 @@ class TestMlxPhi3LocalBehavior(unittest.TestCase):
             max_position_embeddings=32,
             original_max_position_embeddings=32,
             rope_theta=10000.0,
-            rope_scaling=None,
+            rope_scaling=rope_scaling,
             embd_pdrop=0.0,
             resid_pdrop=0.0,
             attention_dropout=0.0,
         )
+        config.partial_rotary_factor = partial_rotary_factor
         config._attn_implementation = attn_implementation
         config.use_cache = True
         return config
@@ -119,3 +125,24 @@ class TestMlxPhi3LocalBehavior(unittest.TestCase):
         )
 
         self.assertEqual(len(tokens), 3)
+
+    def test_longrope_supports_partial_rotary_factor(self):
+        rope_scaling = {
+            "type": "longrope",
+            "short_factor": [1.0],
+            "long_factor": [1.0],
+        }
+        model = MlxPhi3ForCausalLM(
+            self._tiny_config(
+                partial_rotary_factor=0.5,
+                rope_scaling=rope_scaling,
+            )
+        )
+        model.eval()
+        input_ids = mx.array([[1, 2, 3, 4]], dtype=mx.int32)
+        attention_mask = mx.ones_like(input_ids)
+
+        outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+
+        self.assertEqual(model.model.layers[0].self_attn.rotary_emb.dim, 2)
+        self.assertEqual(outputs.logits.shape, (1, 4, 64))

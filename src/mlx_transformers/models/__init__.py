@@ -12,6 +12,8 @@ from .m2m_100 import M2M100ForConditionalGeneration
 from .openelm import OpenELMForCausalLM, OpenELMModel
 from .phi import PhiForCausalLM, PhiModel
 from .phi3 import Phi3ForCausalLM, Phi3Model
+from .qwen3 import Qwen3ForCausalLM, Qwen3Model
+from .qwen3_vl import Qwen3VLForConditionalGeneration, Qwen3VLModel
 from .persimmon import PersimmonForCausalLM
 from .fuyu import FuyuForCausalLM
 from .roberta import (

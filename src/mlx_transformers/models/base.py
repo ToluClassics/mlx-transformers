@@ -226,11 +226,24 @@ class MlxPretrainedMixin:
             # Architecture-specific tied-embedding resolution.
             # Add branches here for other architectures as needed.
             if "lm_head.weight" in missing_keys:
-                tensors["lm_head.weight"] = tensors["model.embed_tokens.weight"]
-                if "model.embed_tokens.scales" in tensors:
-                    tensors["lm_head.scales"] = tensors["model.embed_tokens.scales"]
-                if "model.embed_tokens.biases" in tensors:
-                    tensors["lm_head.biases"] = tensors["model.embed_tokens.biases"]
+                embed_weight_key = None
+                for candidate in (
+                    "model.embed_tokens.weight",
+                    "model.language_model.embed_tokens.weight",
+                ):
+                    if candidate in tensors:
+                        embed_weight_key = candidate
+                        break
+
+                if embed_weight_key is not None:
+                    tensors["lm_head.weight"] = tensors[embed_weight_key]
+                    embed_prefix = embed_weight_key.rsplit(".", 1)[0]
+                    scales_key = f"{embed_prefix}.scales"
+                    biases_key = f"{embed_prefix}.biases"
+                    if scales_key in tensors:
+                        tensors["lm_head.scales"] = tensors[scales_key]
+                    if biases_key in tensors:
+                        tensors["lm_head.biases"] = tensors[biases_key]
 
         self._apply_pretrained_tensors(tensors)
         if should_quantize and not prequantized_checkpoint:

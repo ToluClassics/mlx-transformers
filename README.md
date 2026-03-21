@@ -101,6 +101,8 @@ Current exports from `src/mlx_transformers/models/__init__.py`:
   - `LlamaModel`, `LlamaForCausalLM`
   - `PhiModel`, `PhiForCausalLM`
   - `Phi3Model`, `Phi3ForCausalLM`
+  - `Qwen3Model`, `Qwen3ForCausalLM`
+  - `Qwen3VLModel`, `Qwen3VLForConditionalGeneration`
   - `OpenELMModel`, `OpenELMForCausalLM`
   - `PersimmonForCausalLM`
   - `FuyuForCausalLM`
@@ -158,6 +160,43 @@ python examples/text_generation/openelm_generation.py \
   --prompt "Summarize grouped-query attention." \
   --max-tokens 128
 ```
+
+### Qwen3 Text Generation
+
+```bash
+python examples/text_generation/qwen3_generation.py \
+  --model-name Qwen/Qwen3-0.6B \
+  --prompt "Explain grouped-query attention in one paragraph." \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
+### Qwen3-VL Image + Text Generation
+
+```bash
+python examples/text_generation/qwen3_vl_generation.py \
+  --model-name Qwen/Qwen3-VL-2B-Instruct \
+  --image-url "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg" \
+  --prompt "Describe the image and mention the likely setting." \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
+### Quantized Qwen3-VL Image + Text Generation
+
+```bash
+python examples/text_generation/qwen3_vl_generation.py \
+  --model-name Qwen/Qwen3-VL-2B-Instruct \
+  --image-path /Users/odunayoogundepo/Desktop/screenshot.png \
+  --prompt "What is happening in this image?" \
+  --max-tokens 1048 \
+  --temp 0.0 \
+  --quantize \
+  --mode nvfp4 \
+  --quantize-input
+```
+
+`--quantize-input` is only valid with `--mode nvfp4` or `--mode mxfp8`.
 
 ### NLLB / M2M-100 Translation
 

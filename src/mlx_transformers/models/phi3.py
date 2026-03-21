@@ -237,6 +237,7 @@ class Phi3Attention(nn.Module):
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
         self.original_max_position_embeddings = config.original_max_position_embeddings
+        self.partial_rotary_factor = getattr(config, "partial_rotary_factor", 1.0)
         rope_settings = _get_rope_settings(config)
         self.rope_theta = rope_settings.get(
             "rope_theta", getattr(config, "rope_theta", 10000.0)
@@ -264,7 +265,7 @@ class Phi3Attention(nn.Module):
         rope_settings = _get_rope_settings(self.config)
         if not rope_settings or rope_settings.get("rope_type", "default") == "default":
             self.rotary_emb = Phi3RotaryEmbedding(
-                self.head_dim,
+                int(self.partial_rotary_factor * self.head_dim),
                 max_position_embeddings=self.max_position_embeddings,
                 base=self.rope_theta,
             )
@@ -272,7 +273,7 @@ class Phi3Attention(nn.Module):
             scaling_type = rope_settings.get("rope_type", rope_settings.get("type"))
             if scaling_type in {"longrope", "su"}:
                 self.rotary_emb = Phi3SuScaledRotaryEmbedding(
-                    self.head_dim,
+                    int(self.partial_rotary_factor * self.head_dim),
                     rope_settings["short_factor"],
                     rope_settings["long_factor"],
                     max_position_embeddings=self.max_position_embeddings,
@@ -281,7 +282,7 @@ class Phi3Attention(nn.Module):
                 )
             elif scaling_type == "yarn":
                 self.rotary_emb = Phi3YarnScaledRotaryEmbedding(
-                    self.head_dim,
+                    int(self.partial_rotary_factor * self.head_dim),
                     rope_settings["short_factor"],
                     rope_settings["long_factor"],
                     max_position_embeddings=self.max_position_embeddings,
@@ -333,13 +334,28 @@ class Phi3Attention(nn.Module):
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
 
         cos, sin = self.rotary_emb(value_states, position_ids, seq_len=kv_seq_len)
-
-        query_states, key_states = apply_rotary_pos_emb(
-            query_states, key_states, cos, sin, position_ids
+        query_rot, query_pass = (
+            query_states[..., : self.rotary_emb.dim],
+            query_states[..., self.rotary_emb.dim :],
+        )
+        key_rot, key_pass = (
+            key_states[..., : self.rotary_emb.dim],
+            key_states[..., self.rotary_emb.dim :],
         )
 
+        query_rot, key_rot = apply_rotary_pos_emb(
+            query_rot, key_rot, cos, sin, position_ids
+        )
+
+        query_states = mx.concatenate([query_rot, query_pass], axis=-1)
+        key_states = mx.concatenate([key_rot, key_pass], axis=-1)
+
         if past_key_value is not None:
-            cache_kwargs = {"sin": sin, "cos": cos}
+            cache_kwargs = {
+                "sin": sin,
+                "cos": cos,
+                "partial_rotation_size": self.rotary_emb.dim,
+            }
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )
@@ -431,12 +447,28 @@ class Phi3SdpaAttention(Phi3Attention):
             kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
         cos, sin = self.rotary_emb(value_states, position_ids, seq_len=kv_seq_len)
 
-        query_states, key_states = apply_rotary_pos_emb(
-            query_states, key_states, cos, sin, position_ids
+        query_rot, query_pass = (
+            query_states[..., : self.rotary_emb.dim],
+            query_states[..., self.rotary_emb.dim :],
+        )
+        key_rot, key_pass = (
+            key_states[..., : self.rotary_emb.dim],
+            key_states[..., self.rotary_emb.dim :],
         )
 
+        query_rot, key_rot = apply_rotary_pos_emb(
+            query_rot, key_rot, cos, sin, position_ids
+        )
+
+        query_states = mx.concatenate([query_rot, query_pass], axis=-1)
+        key_states = mx.concatenate([key_rot, key_pass], axis=-1)
+
         if past_key_value is not None:
-            cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
+            cache_kwargs = {
+                "sin": sin,
+                "cos": cos,
+                "partial_rotation_size": self.rotary_emb.dim,
+            }
             key_states, value_states = past_key_value.update(
                 key_states, value_states, self.layer_idx, cache_kwargs
             )

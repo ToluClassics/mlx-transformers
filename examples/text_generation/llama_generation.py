@@ -6,6 +6,7 @@ import mlx.core as mx
 from transformers import AutoTokenizer, LlamaConfig
 
 from mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
+from common import get_eos_token_ids
 
 
 def tic():
@@ -56,13 +57,7 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
     )
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
-    eos_token_ids = tokenizer.eos_token_id
-    if eos_token_ids is None:
-        eos_token_ids = set()
-    elif isinstance(eos_token_ids, int):
-        eos_token_ids = {eos_token_ids}
-    else:
-        eos_token_ids = set(eos_token_ids)
+    eos_token_ids = get_eos_token_ids(args.model_name, tokenizer)
     skip = 0
     prompt_processing = None
     tokens = []

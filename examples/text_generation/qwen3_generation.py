@@ -3,10 +3,10 @@ import time
 from typing import Tuple
 
 import mlx.core as mx
-from transformers import AutoTokenizer, LlamaConfig
+from transformers import AutoConfig, AutoTokenizer
 
-from mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
 from common import get_eos_token_ids
+from mlx_transformers.models import Qwen3ForCausalLM as MlxQwen3ForCausalLM
 
 
 def tic():
@@ -20,35 +20,18 @@ def toc(msg, start):
     return f"[INFO] {msg}: {end - start:.3f} s"
 
 
-def load_model(model_name: str, args) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
-    """
-    Load a quantized LLaMA model and tokenizer from Hugging Face.
+def load_model(model_name: str) -> Tuple[MlxQwen3ForCausalLM, AutoTokenizer]:
+    config = AutoConfig.from_pretrained(model_name)
 
-    Args:
-        model_name: Name of the LLaMA checkpoint to load
-        args: Parsed CLI arguments controlling quantization
-
-    Returns:
-        The quantized model and tokenizer
-    """
-    config = LlamaConfig.from_pretrained(model_name)
-
-    model = MlxLlamaForCausalLM(config)
-    model.from_pretrained(
-        model_name,
-        quantize=True,
-        group_size=args.group_size,
-        bits=args.bits,
-        mode=args.mode,
-        quantize_input=args.quantize_input,
-    )
+    model = MlxQwen3ForCausalLM(config)
+    model.from_pretrained(model_name)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     return model, tokenizer
 
 
-def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
+def generate(model: MlxQwen3ForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
     messages = [{"role": "user", "content": args.prompt}]
     inputs = tokenizer.apply_chat_template(
@@ -61,7 +44,6 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
     eos_token_ids = get_eos_token_ids(args.model_name, tokenizer)
-
     skip = 0
     prompt_processing = None
     tokens = []
@@ -94,16 +76,16 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Quantized LLaMA inference script")
+    parser = argparse.ArgumentParser(description="Qwen3 inference script")
     parser.add_argument(
         "--model-name",
         help="The model name to load",
-        default="meta-llama/Llama-3.2-1B-Instruct",
+        default="Qwen/Qwen3-0.6B",
     )
     parser.add_argument(
         "--prompt",
         help="The message to be processed by the model.",
-        default="Write a short explanation of weight quantization.",
+        default="Explain grouped-query attention in one paragraph.",
     )
     parser.add_argument(
         "--max-tokens", "-m", type=int, default=256, help="How many tokens to generate"
@@ -115,34 +97,12 @@ if __name__ == "__main__":
         "--temp", type=float, default=0.0, help="The sampling temperature"
     )
     parser.add_argument("--seed", type=int, default=0, help="The PRNG seed")
-    parser.add_argument(
-        "--group-size",
-        type=int,
-        default=64,
-        help="Quantization group size passed to mlx.nn.quantize",
-    )
-    parser.add_argument(
-        "--bits",
-        type=int,
-        default=4,
-        help="Number of bits per quantized weight",
-    )
-    parser.add_argument(
-        "--mode",
-        default="affine",
-        help="Quantization mode, for example affine, mxfp4, nvfp4, or mxfp8",
-    )
-    parser.add_argument(
-        "--quantize-input",
-        action="store_true",
-        help="Quantize supported layer inputs; requires mode nvfp4 or mxfp8",
-    )
 
     args = parser.parse_args()
 
     mx.random.seed(args.seed)
     mx.set_default_device(mx.gpu)
 
-    model, tokenizer = load_model(args.model_name, args)
+    model, tokenizer = load_model(args.model_name)
 
     generate(model, tokenizer, args)
