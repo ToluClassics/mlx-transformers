@@ -33,32 +33,45 @@ class BertEmbeddings(nn.Module):
             config.max_position_embeddings, config.hidden_size
         )
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def __call__(
         self,
-        input_ids: mx.array,
-        position_ids: mx.array,
+        input_ids: Optional[mx.array] = None,
+        position_ids: Optional[mx.array] = None,
         token_type_ids: mx.array = None,
+        inputs_embeds: Optional[mx.array] = None,
     ) -> mx.array:
-        words = self.word_embeddings(input_ids)
+        if input_ids is not None:
+            input_shape = input_ids.shape
+        else:
+            input_shape = inputs_embeds.shape[:-1]
+
+        if inputs_embeds is None:
+            words = self.word_embeddings(input_ids)
+        else:
+            words = inputs_embeds
 
         position_ids = (
-            mx.arange(input_ids.shape[1]) if position_ids is None else position_ids
+            mx.arange(input_shape[1], dtype=mx.int32)
+            if position_ids is None
+            else position_ids.astype(mx.int32)
         )
 
-        position = self.position_embeddings(
-            mx.broadcast_to(position_ids, input_ids.shape)
-        )
+        position = self.position_embeddings(mx.broadcast_to(position_ids, input_shape))
 
         if token_type_ids is None:
             # If token_type_ids is not provided, default to zeros
-            token_type_ids = mx.zeros_like(input_ids)
+            token_type_ids = mx.zeros(input_shape, dtype=mx.int32)
+        else:
+            token_type_ids = token_type_ids.astype(mx.int32)
 
         token_types = self.token_type_embeddings(token_type_ids)
 
         embeddings = position + words + token_types
 
-        return self.LayerNorm(embeddings)
+        embeddings = self.LayerNorm(embeddings)
+        return self.dropout(embeddings)
 
 
 class BertSelfAttention(nn.Module):
@@ -79,7 +92,6 @@ class BertSelfAttention(nn.Module):
         self.query = nn.Linear(config.hidden_size, self.all_head_size)
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
         self.value = nn.Linear(config.hidden_size, self.all_head_size)
-        self.train = False
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
@@ -117,8 +129,7 @@ class BertSelfAttention(nn.Module):
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
-        if self.train:
-            attention_probs = self.dropout(attention_probs)
+        attention_probs = self.dropout(attention_probs)
 
         context_layer = attention_probs @ value_layer
 
@@ -138,10 +149,10 @@ class BertSelfOutput(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.train = config.train if hasattr(config, "train") else False
 
     def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
+        hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
@@ -166,9 +177,9 @@ class BertAttention(nn.Module):
             output_attentions,
         )
         attention_output = self.output(self_outputs[0], hidden_states)
-        outputs = (
-            attention_output,
-        ) + self_outputs[1:]  # add attentions if we output them
+        outputs = (attention_output,) + self_outputs[
+            1:
+        ]  # add attentions if we output them
         return outputs
 
 
@@ -194,14 +205,9 @@ class BertOutput(nn.Module):
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-        self.train = config.train if hasattr(config, "train") else False
-
     def __call__(self, hidden_states: mx.array, input_tensor: mx.array) -> mx.array:
         hidden_states = self.dense(hidden_states)
-
-        if self.train:
-            hidden_states = self.dropout(hidden_states)
-
+        hidden_states = self.dropout(hidden_states)
         hidden_states = self.LayerNorm(hidden_states + input_tensor)
         return hidden_states
 
@@ -226,6 +232,15 @@ class BertLayer(nn.Module):
         past_key_value: Optional[Tuple[Tuple[mx.array]]] = None,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mx.array]:
+        if encoder_hidden_states is not None or encoder_attention_mask is not None:
+            raise NotImplementedError(
+                "Cross-attention is not implemented for this encoder-only BERT layer"
+            )
+        if past_key_value is not None:
+            raise NotImplementedError(
+                "KV cache is not implemented for this encoder-only BERT layer"
+            )
+
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
@@ -248,8 +263,6 @@ class BertLayer(nn.Module):
 class BertEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.train = config.train if hasattr(config, "train") else False
-
         self.layer = [BertLayer(config) for _ in range(config.num_hidden_layers)]
         self.gradient_checkpointing = False
 
@@ -343,6 +356,14 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         super().__init__()
 
         self.config = config
+        if getattr(config, "is_decoder", False):
+            raise NotImplementedError(
+                "Decoder mode is not implemented for this BERT model"
+            )
+        if getattr(config, "add_cross_attention", False):
+            raise NotImplementedError(
+                "Cross-attention is not implemented for this encoder-only BERT model"
+            )
 
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
@@ -361,6 +382,7 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
+        inputs_embeds: Optional[mx.array] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -379,13 +401,27 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
+        if use_cache:
+            raise NotImplementedError(
+                "use_cache is not implemented for this encoder-only BERT model"
+            )
 
-        input_shape = input_ids.shape
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError(
+                "You cannot specify both input_ids and inputs_embeds at the same time"
+            )
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        if input_ids is not None:
+            input_shape = input_ids.shape
+        else:
+            input_shape = inputs_embeds.shape[:-1]
 
         batch_size, seq_length = input_shape
 
         if attention_mask is None:
-            attention_mask = mx.ones(((batch_size, seq_length + 0)))
+            attention_mask = mx.ones((batch_size, seq_length), dtype=mx.int32)
 
         if token_type_ids is None:
             if hasattr(self.embeddings, "token_type_ids"):
@@ -395,7 +431,7 @@ class BertModel(nn.Module, MlxPretrainedMixin):
                 )
                 token_type_ids = buffered_token_type_ids_expanded
             else:
-                token_type_ids = mx.zeros(input_shape)
+                token_type_ids = mx.zeros(input_shape, dtype=mx.int32)
 
         extended_attention_mask: mx.array = get_extended_attention_mask(
             attention_mask, input_shape
@@ -405,6 +441,7 @@ class BertModel(nn.Module, MlxPretrainedMixin):
             input_ids=input_ids,
             position_ids=position_ids,
             token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds,
         )
         encoder_outputs = self.encoder(
             embedding_output,
@@ -472,6 +509,7 @@ class BertForMaskedLM(nn.Module, MlxPretrainedMixin):
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
+        inputs_embeds: Optional[mx.array] = None,
         use_cache: Optional[bool] = None,
         labels: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
@@ -481,11 +519,16 @@ class BertForMaskedLM(nn.Module, MlxPretrainedMixin):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
+        if use_cache:
+            raise NotImplementedError(
+                "use_cache is not implemented for BertForMaskedLM"
+            )
         outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -529,7 +572,6 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
         )
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-        self.train = config.train if hasattr(config, "train") else False
 
     def __call__(
         self,
@@ -537,6 +579,7 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
+        inputs_embeds: Optional[mx.array] = None,
         labels: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -558,6 +601,7 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -565,8 +609,7 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
 
         pooled_output = outputs.pooler_output
 
-        if self.train:
-            pooled_output = self.dropout(pooled_output)
+        pooled_output = self.dropout(pooled_output)
 
         logits = self.classifier(pooled_output)
 
@@ -592,7 +635,10 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
                     logits.view(-1, self.num_labels), labels.view(-1)
                 )
             elif self.config.problem_type == "multi_label_classification":
-                loss = nn.losses.binary_cross_entropy(logits, labels)
+                max_val = mx.maximum(logits, 0.0)
+                loss = mx.mean(
+                    max_val - logits * labels + mx.log1p(mx.exp(-mx.abs(logits)))
+                )
 
         if not return_dict:
             output = (logits,) + outputs[2:]
@@ -621,14 +667,13 @@ class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
         self.dropout = nn.Dropout(classifier_dropout)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
 
-        self.train = config.train if hasattr(config, "train") else False
-
     def __call__(
         self,
         input_ids: Optional[mx.array] = None,
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
+        inputs_embeds: Optional[mx.array] = None,
         labels: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -647,6 +692,7 @@ class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -654,8 +700,7 @@ class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
 
         sequence_output = outputs.last_hidden_state
 
-        if self.train:
-            sequence_output = self.dropout(sequence_output)
+        sequence_output = self.dropout(sequence_output)
 
         logits = self.classifier(sequence_output)
 
@@ -691,6 +736,7 @@ class BertForQuestionAnswering(nn.Module, MlxPretrainedMixin):
         attention_mask: Optional[mx.array] = None,
         token_type_ids: Optional[mx.array] = None,
         position_ids: Optional[mx.array] = None,
+        inputs_embeds: Optional[mx.array] = None,
         start_positions: Optional[mx.array] = None,
         end_positions: Optional[mx.array] = None,
         output_attentions: Optional[bool] = None,
@@ -716,6 +762,7 @@ class BertForQuestionAnswering(nn.Module, MlxPretrainedMixin):
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             position_ids=position_ids,
+            inputs_embeds=inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -731,15 +778,13 @@ class BertForQuestionAnswering(nn.Module, MlxPretrainedMixin):
 
         total_loss = None
         if start_positions is not None and end_positions is not None:
-            # If we are on multi-GPU, split add a dimension
-            if len(start_positions.size()) > 1:
+            if len(start_positions.shape) > 1:
                 start_positions = start_positions.squeeze(-1)
-            if len(end_positions.size()) > 1:
+            if len(end_positions.shape) > 1:
                 end_positions = end_positions.squeeze(-1)
-            # sometimes the start/end positions are outside our model inputs, we ignore these terms
-            ignored_index = start_logits.size(1)
-            start_positions = start_positions.clamp(0, ignored_index)
-            end_positions = end_positions.clamp(0, ignored_index)
+            ignored_index = start_logits.shape[1]
+            start_positions = mx.clip(start_positions, 0, ignored_index)
+            end_positions = mx.clip(end_positions, 0, ignored_index)
 
             loss_fct = nn.losses.cross_entropy
             start_loss = loss_fct(start_logits, start_positions)

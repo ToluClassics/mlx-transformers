@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import mlx.core as mx
 
 logger = logging.getLogger(__name__)
+_SEEN_TOKENS_WARNING_EMITTED = False
 
 
 # Adapted from: https://github.com/huggingface/transformers/blob/e74d793a3c3c0bc9bf3fb94bb31dd16934b1b0db/src/transformers/cache_utils.py#L14
@@ -50,11 +51,13 @@ class Cache:
 
     @property
     def seen_tokens(self):
-        logger.warning_once(
-            "The `seen_tokens` attribute is deprecated and will be removed in v4.41."
-            "Use the `cache_position` "
-            "model input instead."
-        )
+        global _SEEN_TOKENS_WARNING_EMITTED
+        if not _SEEN_TOKENS_WARNING_EMITTED:
+            logger.warning(
+                "The `seen_tokens` attribute is deprecated and will be removed in v4.41. "
+                "Use the `cache_position` model input instead."
+            )
+            _SEEN_TOKENS_WARNING_EMITTED = True
         if hasattr(self, "_seen_tokens"):
             return self._seen_tokens
         else:
@@ -74,7 +77,9 @@ class DynamicCache(Cache):
     def __init__(self) -> None:
         self.key_cache: List[mx.array] = []
         self.value_cache: List[mx.array] = []
-        self._seen_tokens = 0  # Used in `generate` to keep tally of how many tokens the cache has seen
+        self._seen_tokens = (
+            0  # Used in `generate` to keep tally of how many tokens the cache has seen
+        )
 
     def __getitem__(self, layer_idx: int) -> List[Tuple[mx.array]]:
         """

@@ -2,131 +2,195 @@
 
 [![PyPI](https://img.shields.io/pypi/v/mlx-transformers?color=red)](https://pypi.org/project/mlx-transformers/)
 
+`mlx-transformers` provides MLX implementations of several Hugging Face-style model architectures for Apple Silicon. The project keeps a familiar Transformers-style API while loading weights from Hugging Face checkpoints and running inference with MLX.
 
-MLX Transformers is a library that provides model implementations in [MLX](https://github.com/ml-explore/mlx). It uses a similar model interface as HuggingFace Transformers and provides a way to load and use models in Apple Silicon devices. Implemented models have the same modules and module key as the original implementations in transformers.
+The repository is currently inference-focused. Some model families have broader parity than others, but the core usage pattern is the same across the package:
 
-MLX transformers is currently only available for inference on Apple Silicon devices. Training support will be added in the future.
+```python
+import mlx.core as mx
+from transformers import AutoConfig, AutoTokenizer
 
-# Installation
+from mlx_transformers.models import BertModel
 
-This library is available on PyPI and can be installed using pip:
+model_name = "sentence-transformers/all-MiniLM-L6-v2"
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+config = AutoConfig.from_pretrained(model_name)
+
+model = BertModel(config)
+model.from_pretrained(model_name)
+
+inputs = tokenizer("Hello from MLX", return_tensors="np")
+inputs = {k: mx.array(v) for k, v in inputs.items()}
+
+outputs = model(**inputs)
+```
+
+## Requirements
+
+- Apple Silicon Mac
+- Python 3.10+
+- MLX-compatible environment
+
+Some models are gated on Hugging Face. If needed, set `HF_TOKEN` in your environment before calling `from_pretrained(...)`.
+
+## Installation
+
+Install from PyPI:
 
 ```bash
 pip install mlx-transformers
 ```
 
-It is also recommended to install [`asitop`](https://github.com/tlkh/asitop)
-which can be super useful for monitoring the GPU and CPU usage on Apple Silicon devices.
+Install for local development:
 
-## Models Supported
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
 
-- Phi Family of Models (Phi3, Phi2, Phi)
-- LLama
-- Fuyu and Persimmon
-- Machine Translation Models (NLLB, M2M-100)
-- Encoder Models (Bert, RoBERTa, XLMRoberta, Sentence Transformers)
+`asitop` is also useful if you want to monitor GPU and CPU usage on Apple Silicon:
+
+```bash
+pip install asitop
+```
+
+## Available Models
+
+Current exports from `src/mlx_transformers/models/__init__.py`:
+
+- BERT
+  - `BertModel`
+  - `BertForMaskedLM`
+  - `BertForSequenceClassification`
+  - `BertForTokenClassification`
+  - `BertForQuestionAnswering`
+- RoBERTa
+  - `RobertaModel`
+  - `RobertaForSequenceClassification`
+  - `RobertaForTokenClassification`
+  - `RobertaForQuestionAnswering`
+- XLM-RoBERTa
+  - `XLMRobertaModel`
+  - `XLMRobertaForSequenceClassification`
+  - `XLMRobertaForTokenClassification`
+  - `XLMRobertaForQuestionAnswering`
+- Causal LMs
+  - `LlamaModel`, `LlamaForCausalLM`
+  - `PhiModel`, `PhiForCausalLM`
+  - `Phi3Model`, `Phi3ForCausalLM`
+  - `OpenELMModel`, `OpenELMForCausalLM`
+  - `PersimmonForCausalLM`
+  - `FuyuForCausalLM`
+- Translation
+  - `M2M100ForConditionalGeneration`
+
+## Examples
+
+### Sentence Embeddings with BERT
+
+```bash
+python examples/bert/sentence_transformers.py
+```
+
+### LLaMA Text Generation
+
+The LLaMA example now formats the input with the tokenizer chat template and stops on EOS.
+
+```bash
+python examples/text_generation/llama_generation.py \
+  --model-name meta-llama/Llama-3.2-1B-Instruct \
+  --prompt "Write a short explanation of rotary embeddings." \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
+### Phi-3 Text Generation
+
+```bash
+python examples/text_generation/phi3_generation.py \
+  --model-name microsoft/Phi-3-mini-4k-instruct \
+  --prompt "Explain attention masking." \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
+### OpenELM Text Generation
+
+```bash
+python examples/text_generation/openelm_generation.py \
+  --model-name apple/OpenELM-1_1B-Instruct \
+  --prompt "Summarize grouped-query attention." \
+  --max-tokens 128
+```
+
+### NLLB / M2M-100 Translation
+
+```bash
+python examples/translation/nllb_translation.py \
+  --model_name facebook/nllb-200-distilled-600M \
+  --source_language English \
+  --target_language Yoruba \
+  --text_to_translate "Let us translate text to Yoruba"
+```
 
 ## Chat Interface
 
-MLX Transformers provides a streamlit chat interface that can be used to interact with the models.
-This template was adopted from https://github.com/da-z/mlx-ui.
+A Streamlit chat UI is included under `chat/`.
+
+```bash
+cd chat
+bash start.sh
+```
 
 ![Chat Image](images/mlx_transformer_chat.png)
 
-The chat interface is available in the `mlx_transformers/chat` module and can be used as follows:
+## Tests
+
+The repository currently includes focused tests for:
+
+- BERT
+- RoBERTa
+- XLM-RoBERTa
+- LLaMA
+- Phi
+- Phi-3
+
+Run the full test suite:
 
 ```bash
-- cd chat
-- bash start.sh
+python -m unittest
 ```
 
-## Quick Tour
+Run a single module:
 
-A list of the available models can be found in the `mlx_transformers.models` module and are also listed in the [section below](#available-model-architectures). The following example demonstrates how to load a model and use it for inference:
-
-
-- You can load the model using MLX transformers in few lines of code
-
-    ```python
-    import mlx.core as mx
-    from transformers import BertConfig, BertTokenizer
-    from mlx_transformers.models import BertForMaskedLM as MLXBertForMaskedLM
-
-    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    config = BertConfig.from_pretrained("bert-base-uncased")
-    
-    model = MLXBertForMaskedLM(config)
-    model.from_pretrained("bert-base-uncased")
-
-    sample_input = "Hello, world!"
-    inputs = tokenizer(sample_input, return_tensors="np")
-    inputs = {key: mx.array(v) for key, v in inputs.items()}
-
-    outputs = model(**inputs)
-    ```
-
-### Sentence Transformer Example
-
-```python
-import mlx.core as mx
-import numpy as np
-
-from transformers import AutoConfig, AutoTokenizer
-from mlx_transformers.models import BertModel as MLXBertModel
-
-
-def _mean_pooling(last_hidden_state: mx.array, attention_mask: mx.array):
-    token_embeddings = last_hidden_state
-    input_mask_expanded = mx.expand_dims(attention_mask, -1)
-    input_mask_expanded = mx.broadcast_to(input_mask_expanded, token_embeddings.shape).astype(mx.float32)
-    sum_embeddings = mx.sum(token_embeddings * input_mask_expanded, 1)
-    sum_mask = mx.clip(input_mask_expanded.sum(axis=1), 1e-9, None)
-    return sum_embeddings / sum_mask
-
-sentences = ['This is an example sentence', 'Each sentence is converted']
-
-tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-config = AutoConfig.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
-
-model = MLXBertModel(config)
-model.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
-
-inputs = tokenizer(sentences, return_tensors="np", padding=True, truncation=True)
-inputs = {key: mx.array(v) for key, v in inputs.items()}
-
-outputs = model(**inputs)
-
-sentence_embeddings = _mean_pooling(outputs.last_hidden_state, inputs.attention_mask)
+```bash
+python -m unittest tests.test_bert
+python -m unittest tests.test_llama
 ```
 
+Some tests download model weights from Hugging Face on first run.
 
-## Other Examples
+## Repository Layout
 
-The `examples` directory contains a few examples that demonstrate how to use the models in MLX Transformers. 
+```text
+src/mlx_transformers/models/   model implementations and shared helpers
+examples/                      runnable examples
+tests/                         model parity and behavior tests
+chat/                          streamlit chat interface
+```
 
-1. [LLama Example](examples/text_generation/llama_generation.py)
-    ```bash
-    python3 examples/llama_generation.py --model-name "meta-llama/Llama-2-7b-hf"  
-    ```
+## Notes
 
-2. [NLLB Translation Example](examples/translation/nllb_translation.py)
-    ```bash
-    python3 examples/translation/nllb_translation.py --model_name facebook/nllb-200-distilled-600M --source_language English --target_language Yoruba --text_to_translate "Let us translate text to Yoruba"
+- Model loading is handled through `from_pretrained(...)` in `src/mlx_transformers/models/base.py`.
+- Pretrained models are loaded in eval mode by default.
+- Causal generation support is present for the decoder-style model families, but parity and feature coverage still vary by architecture.
 
-    Output:==> ['Ẹ jẹ́ ká tú àwọn ẹsẹ Bíbélì sí èdè Yoruba']
-    ```
+## Contributing
 
-3. [Phi Generation Example](examples/text_generation/phi3_generation.py)
-    ```bash
-    python3 examples/text_generation/phi3_generation.py --temp 1.0
-    ```
+Contributions are welcome. The highest-value contributions are usually:
 
-
-## Benchmarks
-
-Coming soon...
-
-## Contributions
-
-Contributions to MLX transformers are welcome. We would like to have as many model implementations as possible.
-See the contributing documentation for instructions on setting up a development environment.
+- new model implementations
+- parity fixes against Hugging Face behavior
+- generation and cache correctness fixes
+- tests for unsupported or weakly covered paths
