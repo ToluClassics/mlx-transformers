@@ -15,6 +15,16 @@ from .utils import ACT2FN
 logger = logging.getLogger(__name__)
 
 
+def _get_rope_settings(config: PhiConfig) -> dict:
+    rope_parameters = getattr(config, "rope_parameters", None)
+    if rope_parameters is not None:
+        return rope_parameters
+    rope_scaling = getattr(config, "rope_scaling", None)
+    if rope_scaling is not None:
+        return rope_scaling
+    return {}
+
+
 class PhiRotaryEmbedding(nn.Module):
     def __init__(self, dim, max_position_embeddings=2048, base=10000):
         super().__init__()
@@ -53,7 +63,7 @@ class PhiLinearScalingRotaryEmbedding(PhiRotaryEmbedding):
         self.scaling_factor = scaling_factor
         super().__init__(dim, max_position_embeddings, base)
 
-    def _set_cos_sin_cache(self, seq_len, device, dtype):
+    def _set_cos_sin_cache(self, seq_len, dtype):
         self.max_seq_len_cached = seq_len
         t = mx.arange(self.max_seq_len_cached, dtype=mx.int64).astype(
             self.inv_freq.dtype
@@ -82,7 +92,7 @@ class PhiDynamicNTKScalingRotaryEmbedding(PhiRotaryEmbedding):
             ) ** (self.dim / (self.dim - 2))
             self.inv_freq = 1.0 / (base ** (mx.arange(0, self.dim, 2) / self.dim))
 
-        cos, sin = super().__call__(x, position_ids)
+        cos, sin = super().__call__(x, seq_len=seq_len)
         return cos, sin
 
 
@@ -144,7 +154,9 @@ class PhiAttention(nn.Module):
         self.num_key_value_heads = config.num_key_value_heads
         self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
-        self.rope_theta = config.rope_theta
+        self.rope_theta = _get_rope_settings(config).get(
+            "rope_theta", getattr(config, "rope_theta", 10000.0)
+        )
         self.partial_rotary_factor = config.partial_rotary_factor
         self.is_causal = True
 
@@ -179,15 +191,16 @@ class PhiAttention(nn.Module):
         self._init_rope()
 
     def _init_rope(self):
-        if self.config.rope_scaling is None:
+        rope_settings = _get_rope_settings(self.config)
+        if not rope_settings or "factor" not in rope_settings:
             self.rotary_emb = PhiRotaryEmbedding(
                 int(self.partial_rotary_factor * self.head_dim),
                 max_position_embeddings=self.max_position_embeddings,
                 base=self.rope_theta,
             )
         else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
+            scaling_type = rope_settings.get("type", rope_settings.get("rope_type"))
+            scaling_factor = rope_settings["factor"]
             if scaling_type == "linear":
                 self.rotary_emb = PhiLinearScalingRotaryEmbedding(
                     int(self.partial_rotary_factor * self.head_dim),
@@ -325,7 +338,7 @@ class PhiSdpaAttention(PhiAttention):
         output_attentions: bool = False,
         use_cache: bool = False,
     ) -> Tuple[mx.array, Optional[mx.array], Optional[Tuple[mx.array]]]:
-        if output_attentions:
+        if output_attentions or (self.training and self.attention_dropout > 0):
             return super().__call__(
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
@@ -400,8 +413,8 @@ class PhiSdpaAttention(PhiAttention):
             query_states,
             key_states,
             value_states,
+            scale=1 / math.sqrt(self.head_dim),
             mask=attention_mask,
-            dropout_p=self.attention_dropout if self.training else 0.0,
         )
 
         attn_output = attn_output.transpose(0, 2, 1, 3).reshape(
@@ -423,7 +436,8 @@ class PhiDecoderLayer(nn.Module):
     def __init__(self, config: PhiConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
-        self.self_attn = PHI_ATTENTION_CLASSES[config._attn_implementation](
+        attn_implementation = getattr(config, "_attn_implementation", None) or "eager"
+        self.self_attn = PHI_ATTENTION_CLASSES[attn_implementation](
             config=config, layer_idx=layer_idx
         )
 
@@ -628,7 +642,7 @@ class PhiModel(nn.Module):
                 attention_mask.shape[-1]
                 if isinstance(attention_mask, mx.array)
                 or isinstance(attention_mask, np.ndarray)
-                else past_seen_tokens + sequence_length + 1
+                else past_seen_tokens + sequence_length
             )
         causal_mask = mx.full(
             (sequence_length, target_length), vals=min_dtype, dtype=dtype
@@ -665,7 +679,7 @@ class PhiModel(nn.Module):
                 else:
                     offset = 0
                 mask_shape = attention_mask.shape
-                mask_slice = (attention_mask == 0.0).to(dtype=dtype) * min_dtype
+                mask_slice = (attention_mask == 0.0).astype(dtype) * min_dtype
                 causal_mask[
                     : mask_shape[0],
                     : mask_shape[1],
@@ -706,7 +720,7 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
 
     def __call__(
         self,
-        input_ids,
+        input_ids=None,
         attention_mask=None,
         position_ids=None,
         past_key_values=None,
@@ -732,6 +746,17 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
             return_dict if return_dict is not None else self.config.use_return_dict
         )
 
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError(
+                "You cannot specify both input_ids and inputs_embeds at the same time"
+            )
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        current_input_length = (
+            input_ids.shape[1] if input_ids is not None else inputs_embeds.shape[1]
+        )
+
         if attention_mask is not None and position_ids is None:
             # create position_ids on the fly for batch generation
             position_ids = attention_mask.astype(mx.int32).cumsum(-1) - 1
@@ -745,7 +770,7 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
             ).filled(1)
             position_ids = mx.array(position_ids)
             if past_key_values:
-                position_ids = position_ids[:, -input_ids.shape[1] :]
+                position_ids = position_ids[:, -current_input_length:]
 
         outputs = self.model(
             input_ids=input_ids,
@@ -767,8 +792,16 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
         loss = None
 
         if labels is not None:
-            # TODO: implement loss
-            pass
+            shift_logits = logits[:, :-1, :]
+            shift_labels = labels[:, 1:].astype(mx.int32)
+            valid_mask = (shift_labels != -100).astype(shift_logits.dtype)
+            safe_labels = mx.where(shift_labels != -100, shift_labels, 0)
+            token_loss = nn.losses.cross_entropy(
+                shift_logits,
+                safe_labels,
+                reduction="none",
+            )
+            loss = mx.sum(token_loss * valid_mask) / mx.maximum(mx.sum(valid_mask), 1.0)
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -793,7 +826,7 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
         if past_key_values is not None:
             if isinstance(past_key_values, Cache):
                 cache_length = past_key_values.get_seq_length()
-                past_length = past_key_values.seen_tokens
+                past_length = cache_length
                 max_cache_length = past_key_values.get_max_length()
             else:
                 cache_length = past_length = past_key_values[0][0].shape[2]
@@ -871,8 +904,9 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
         next_token = sample(next_token_logits)
 
         yield next_token
+        generated_tokens = 1
 
-        while True:
+        while generated_tokens < max_length:
             # Update the prompt
             next_token = mx.expand_dims(next_token, axis=0)
 
@@ -896,3 +930,4 @@ class PhiForCausalLM(nn.Module, MlxPretrainedMixin):
             next_token = sample(next_token_logits)
 
             yield next_token
+            generated_tokens += 1

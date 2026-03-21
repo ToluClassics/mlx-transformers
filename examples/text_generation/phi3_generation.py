@@ -52,25 +52,40 @@ def load_model(
 
 def generate(model: MlxPhi3ForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
-    inputs = tokenizer(args.prompt, return_tensors="np", truncation=True)
+    messages = [{"role": "user", "content": args.prompt}]
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        tokenize=True,
+        return_dict=True,
+        return_tensors="np",
+    )
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
+    eos_token_ids = tokenizer.eos_token_id
+    if eos_token_ids is None:
+        eos_token_ids = set()
+    elif isinstance(eos_token_ids, int):
+        eos_token_ids = {eos_token_ids}
+    else:
+        eos_token_ids = set(eos_token_ids)
     skip = 0
     prompt_processing = None
     tokens = []
     start = tic()
-    for token in model.generate(inputs, args.temp):
-        tokens.append(token)
+    for token in model.generate(inputs, max_length=args.max_tokens, temp=args.temp):
+        mx.eval(token)
+        token_id = int(token.item())
 
-        if len(tokens) == 1:
-            # Actually perform the computation to measure the prompt processing time
-            mx.eval(token)
+        if prompt_processing is None:
             prompt_processing = toc("Prompt processing", start)
 
-        if len(tokens) >= args.max_tokens:
+        if token_id in eos_token_ids:
             break
 
-        elif (len(tokens) % args.write_every) == 0:
+        tokens.append(token)
+
+        if (len(tokens) % args.write_every) == 0:
             # It is perfectly ok to eval things we have already eval-ed.
             mx.eval(tokens)
             s = tokenizer.decode([t.item() for t in tokens])

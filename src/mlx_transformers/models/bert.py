@@ -232,6 +232,15 @@ class BertLayer(nn.Module):
         past_key_value: Optional[Tuple[Tuple[mx.array]]] = None,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[mx.array]:
+        if encoder_hidden_states is not None or encoder_attention_mask is not None:
+            raise NotImplementedError(
+                "Cross-attention is not implemented for this encoder-only BERT layer"
+            )
+        if past_key_value is not None:
+            raise NotImplementedError(
+                "KV cache is not implemented for this encoder-only BERT layer"
+            )
+
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
@@ -347,6 +356,14 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         super().__init__()
 
         self.config = config
+        if getattr(config, "is_decoder", False):
+            raise NotImplementedError(
+                "Decoder mode is not implemented for this BERT model"
+            )
+        if getattr(config, "add_cross_attention", False):
+            raise NotImplementedError(
+                "Cross-attention is not implemented for this encoder-only BERT model"
+            )
 
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
@@ -384,6 +401,10 @@ class BertModel(nn.Module, MlxPretrainedMixin):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
+        if use_cache:
+            raise NotImplementedError(
+                "use_cache is not implemented for this encoder-only BERT model"
+            )
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError(
@@ -498,6 +519,10 @@ class BertForMaskedLM(nn.Module, MlxPretrainedMixin):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
+        if use_cache:
+            raise NotImplementedError(
+                "use_cache is not implemented for BertForMaskedLM"
+            )
         outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,

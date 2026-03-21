@@ -3,6 +3,7 @@ import unittest
 
 import mlx.core as mx
 import numpy as np
+from transformers.utils import logging as transformers_logging
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -16,6 +17,9 @@ from transformers import (
 
 from src.mlx_transformers.models import BertModel as MlxBertModel
 from src.mlx_transformers.models import (
+    BertForMaskedLM as MlxBertForMaskedLM,
+)
+from src.mlx_transformers.models import (
     BertForQuestionAnswering as MlxBertForQuestionAnswering,
 )
 from src.mlx_transformers.models import (
@@ -28,18 +32,28 @@ from src.mlx_transformers.models.bert import BertEmbeddings, BertSelfOutput
 
 
 def load_hgf_model(model_name: str, hgf_model_class):
-    model = hgf_model_class.from_pretrained(model_name)
+    previous_verbosity = transformers_logging.get_verbosity()
+    transformers_logging.set_verbosity_error()
+    try:
+        model = hgf_model_class.from_pretrained(model_name)
+    finally:
+        transformers_logging.set_verbosity(previous_verbosity)
     return model
 
 
 def load_tokenizer(tokenizer_class, model_name: str):
+    previous_verbosity = transformers_logging.get_verbosity()
+    transformers_logging.set_verbosity_error()
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
             message=r".*WordPiece\.__init__ will not create from files anymore.*",
             category=DeprecationWarning,
         )
-        return tokenizer_class.from_pretrained(model_name)
+        try:
+            return tokenizer_class.from_pretrained(model_name)
+        finally:
+            transformers_logging.set_verbosity(previous_verbosity)
 
 
 class TestMlxBert(unittest.TestCase):
@@ -265,6 +279,34 @@ class TestMlxBertForQuestionAnswering(unittest.TestCase):
 
 
 class TestMlxBertLocalBehavior(unittest.TestCase):
+    def test_model_rejects_decoder_mode(self):
+        config = BertConfig(
+            vocab_size=32,
+            hidden_size=8,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=16,
+            is_decoder=True,
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "Decoder mode is not implemented"
+        ):
+            MlxBertModel(config)
+
+    def test_model_rejects_cross_attention_config(self):
+        config = BertConfig(
+            vocab_size=32,
+            hidden_size=8,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=16,
+            add_cross_attention=True,
+        )
+        with self.assertRaisesRegex(
+            NotImplementedError, "Cross-attention is not implemented"
+        ):
+            MlxBertModel(config)
+
     def test_model_requires_exactly_one_of_input_ids_or_inputs_embeds(self):
         config = BertConfig(
             vocab_size=32,
@@ -308,6 +350,59 @@ class TestMlxBertLocalBehavior(unittest.TestCase):
         outputs = model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
 
         self.assertEqual(outputs.last_hidden_state.shape, (1, 4, 8))
+
+    def test_model_rejects_use_cache(self):
+        config = BertConfig(
+            vocab_size=32,
+            hidden_size=8,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=16,
+        )
+        model = MlxBertModel(config)
+        model.eval()
+
+        input_ids = mx.array([[1, 2, 3, 4]], dtype=mx.int32)
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "use_cache is not implemented"
+        ):
+            model(input_ids=input_ids, use_cache=True)
+
+    def test_layer_rejects_cross_attention_inputs(self):
+        config = BertConfig(
+            vocab_size=32,
+            hidden_size=8,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=16,
+        )
+        layer = MlxBertModel(config).encoder.layer[0]
+        hidden_states = mx.ones((1, 4, 8))
+        encoder_hidden_states = mx.ones((1, 4, 8))
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "Cross-attention is not implemented"
+        ):
+            layer(
+                hidden_states,
+                encoder_hidden_states=encoder_hidden_states,
+            )
+
+    def test_layer_rejects_past_key_value(self):
+        config = BertConfig(
+            vocab_size=32,
+            hidden_size=8,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=16,
+        )
+        layer = MlxBertModel(config).encoder.layer[0]
+        hidden_states = mx.ones((1, 4, 8))
+        past_key_value = ((mx.ones((1, 2, 4, 4)), mx.ones((1, 2, 4, 4))),)
+
+        with self.assertRaisesRegex(NotImplementedError, "KV cache is not implemented"):
+            layer(hidden_states, past_key_value=past_key_value)
 
     def test_embeddings_dropout_respects_train_eval_mode(self):
         config = BertConfig(
@@ -398,6 +493,22 @@ class TestMlxBertLocalBehavior(unittest.TestCase):
         outputs = model(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
 
         self.assertEqual(outputs.logits.shape, (1, 2))
+
+    def test_masked_lm_rejects_use_cache(self):
+        config = BertConfig(
+            vocab_size=32,
+            hidden_size=8,
+            num_hidden_layers=1,
+            num_attention_heads=2,
+            intermediate_size=16,
+        )
+        masked_lm = MlxBertForMaskedLM(config)
+        input_ids = mx.array([[1, 2, 3, 4]], dtype=mx.int32)
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "use_cache is not implemented for BertForMaskedLM"
+        ):
+            masked_lm(input_ids=input_ids, use_cache=True)
 
     def test_question_answering_loss_path_runs_with_labels(self):
         config = BertConfig(
