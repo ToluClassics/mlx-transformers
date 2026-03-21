@@ -26,6 +26,28 @@ inputs = {k: mx.array(v) for k, v in inputs.items()}
 outputs = model(**inputs)
 ```
 
+Quantized loading is supported through the same loader:
+
+```python
+model.from_pretrained(
+    model_name,
+    quantize=True,
+    group_size=64,
+    bits=4,
+    mode="affine",
+)
+```
+
+Pre-quantized MLX checkpoints can also be loaded directly without re-quantizing:
+
+```python
+model_name = "mlx-community/Phi-3-mini-4k-instruct-4bit"
+
+config = AutoConfig.from_pretrained(model_name)
+model = Phi3ForCausalLM(config)
+model.from_pretrained(model_name)
+```
+
 ## Requirements
 
 - Apple Silicon Mac
@@ -101,6 +123,19 @@ The LLaMA example now formats the input with the tokenizer chat template and sto
 python examples/text_generation/llama_generation.py \
   --model-name meta-llama/Llama-3.2-1B-Instruct \
   --prompt "Write a short explanation of rotary embeddings." \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
+### Quantized LLaMA Text Generation
+
+```bash
+python examples/text_generation/quantized_llama_generation.py \
+  --model-name meta-llama/Llama-3.2-1B-Instruct \
+  --prompt "Explain why 4-bit quantization can reduce memory usage." \
+  --bits 4 \
+  --group-size 64 \
+  --mode affine \
   --max-tokens 128 \
   --temp 0.0
 ```
