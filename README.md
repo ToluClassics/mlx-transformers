@@ -109,6 +109,61 @@ Current exports from `src/mlx_transformers/models/__init__.py`:
 - Translation
   - `M2M100ForConditionalGeneration`
 
+### Text Generation Benchmarking
+
+The benchmark script measures prompt prefill time, decode time, and throughput
+for supported text-generation families and emits a markdown table suitable for
+the README.
+
+Supported benchmark families currently include `phi`, `phi3`, `llama`,
+`qwen3`, `openelm`, `persimmon`, and `gemma3_text`.
+
+When `--dataset ultrachat` is set, the script samples prompts from
+`HuggingFaceH4/ultrachat_200k` and benchmarks each token-length bucket
+separately.
+
+Example results:
+
+| Label | Hugging Face model | Bucket | Samples | Prompt tokens | New tokens | Prefill (s) | Prefill tok/s | Decode (s) | Decode tok/s | Full (s) |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| phi3 | microsoft/Phi-3-mini-4k-instruct | 1-128 | 30 | 97 | 107 | 0.151 | 674.42 | 5.985 | 17.63 | 6.135 |
+| phi3 | microsoft/Phi-3-mini-4k-instruct | 129-512 | 30 | 397 | 96 | 0.654 | 840.55 | 8.636 | 13.11 | 9.290 |
+
+<details>
+<summary>Benchmark commands</summary>
+
+Generic multi-model run:
+
+```bash
+python examples/text_generation/benchmark_generation.py \
+  --model phi3=microsoft/Phi-3-mini-4k-instruct \
+  --model qwen3=Qwen/Qwen3-0.6B \
+  --model openelm=apple/OpenELM-1_1B-Instruct \
+  --dataset ultrachat \
+  --bucket 1:128 \
+  --bucket 129:512 \
+  --bucket 513:1024 \
+  --bucket 1025:2048 \
+  --max-tokens 128 \
+  --runs 3 \
+  --warmup-runs 1 \
+  --output-file benchmark_results.md
+```
+
+Phi-3 4k run used for the table above:
+
+```bash
+python examples/text_generation/benchmark_generation.py \
+  --model phi3=microsoft/Phi-3-mini-4k-instruct \
+  --dataset ultrachat \
+  --bucket 1:128 \
+  --bucket 129:512 \
+  --output-file benchmark_results-phi3-4k.md \
+  --samples-per-bucket 10
+```
+
+</details>
+
 ## Examples
 
 ### Sentence Embeddings with BERT
@@ -219,60 +274,7 @@ python examples/text_generation/gemma3_text_generation.py \
   --temp 0.0
 ```
 
-### Text Generation Benchmarking
 
-The benchmark script measures prompt prefill time, decode time, and throughput
-for supported text-generation families and emits a markdown table suitable for
-the README.
-
-Supported benchmark families currently include `phi`, `phi3`, `llama`,
-`qwen3`, `openelm`, `persimmon`, and `gemma3_text`.
-
-When `--dataset ultrachat` is set, the script samples prompts from
-`HuggingFaceH4/ultrachat_200k` and benchmarks each token-length bucket
-separately.
-
-Example results:
-
-| Label | Hugging Face model | Bucket | Samples | Prompt tokens | New tokens | Prefill (s) | Prefill tok/s | Decode (s) | Decode tok/s | Full (s) |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| phi3 | microsoft/Phi-3-mini-4k-instruct | 1-128 | 30 | 97 | 107 | 0.151 | 674.42 | 5.985 | 17.63 | 6.135 |
-| phi3 | microsoft/Phi-3-mini-4k-instruct | 129-512 | 30 | 397 | 96 | 0.654 | 840.55 | 8.636 | 13.11 | 9.290 |
-
-<details>
-<summary>Benchmark commands</summary>
-
-Generic multi-model run:
-
-```bash
-python examples/text_generation/benchmark_generation.py \
-  --model phi3=microsoft/Phi-3-mini-4k-instruct \
-  --model qwen3=Qwen/Qwen3-0.6B \
-  --model openelm=apple/OpenELM-1_1B-Instruct \
-  --dataset ultrachat \
-  --bucket 1:128 \
-  --bucket 129:512 \
-  --bucket 513:1024 \
-  --bucket 1025:2048 \
-  --max-tokens 128 \
-  --runs 3 \
-  --warmup-runs 1 \
-  --output-file benchmark_results.md
-```
-
-Phi-3 4k run used for the table above:
-
-```bash
-python examples/text_generation/benchmark_generation.py \
-  --model phi3=microsoft/Phi-3-mini-4k-instruct \
-  --dataset ultrachat \
-  --bucket 1:128 \
-  --bucket 129:512 \
-  --output-file benchmark_results-phi3-4k.md \
-  --samples-per-bucket 10
-```
-
-</details>
 
 ### NLLB / M2M-100 Translation
 
