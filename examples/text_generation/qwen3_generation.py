@@ -3,10 +3,10 @@ import time
 from typing import Tuple
 
 import mlx.core as mx
-from transformers import AutoTokenizer, LlamaConfig
+from transformers import AutoConfig, AutoTokenizer
 
-from mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
 from common import get_eos_token_ids
+from mlx_transformers.models import Qwen3ForCausalLM as MlxQwen3ForCausalLM
 
 
 def tic():
@@ -20,24 +20,10 @@ def toc(msg, start):
     return f"[INFO] {msg}: {end - start:.3f} s"
 
 
-def load_model(
-    model_name: str, mlx_model_class
-) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
-    """
-    Load a llama model and tokenizer from the given model name and weights.
+def load_model(model_name: str) -> Tuple[MlxQwen3ForCausalLM, AutoTokenizer]:
+    config = AutoConfig.from_pretrained(model_name)
 
-    Args:
-        model_name (str): Name of the llama model to load
-        model_weights (str): Path to the model weights
-        hgf_model_class: Huggingface model class
-        mlx_model_class: Mlx model class
-
-    Returns:
-        _type_: _description_
-    """
-    config = LlamaConfig.from_pretrained(model_name)
-
-    model = mlx_model_class(config)
+    model = MlxQwen3ForCausalLM(config)
     model.from_pretrained(model_name)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -45,7 +31,7 @@ def load_model(
     return model, tokenizer
 
 
-def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
+def generate(model: MlxQwen3ForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
     messages = [{"role": "user", "content": args.prompt}]
     inputs = tokenizer.apply_chat_template(
@@ -75,7 +61,6 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
         tokens.append(token)
 
         if (len(tokens) % args.write_every) == 0:
-            # It is perfectly ok to eval things we have already eval-ed.
             mx.eval(tokens)
             s = tokenizer.decode([t.item() for t in tokens])
             print(s[skip:], end="", flush=True)
@@ -91,19 +76,19 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Llama inference script")
+    parser = argparse.ArgumentParser(description="Qwen3 inference script")
     parser.add_argument(
         "--model-name",
         help="The model name to load",
-        default="meta-llama/Llama-3.2-1B-Instruct",
+        default="Qwen/Qwen3-0.6B",
     )
     parser.add_argument(
         "--prompt",
         help="The message to be processed by the model.",
-        default="In the beginning the Universe was created.",
+        default="Explain grouped-query attention in one paragraph.",
     )
     parser.add_argument(
-        "--max-tokens", "-m", type=int, default=1024, help="How many tokens to generate"
+        "--max-tokens", "-m", type=int, default=256, help="How many tokens to generate"
     )
     parser.add_argument(
         "--write-every", type=int, default=1, help="After how many tokens to detokenize"
@@ -118,6 +103,6 @@ if __name__ == "__main__":
     mx.random.seed(args.seed)
     mx.set_default_device(mx.gpu)
 
-    model, tokenizer = load_model(args.model_name, MlxLlamaForCausalLM)
+    model, tokenizer = load_model(args.model_name)
 
     generate(model, tokenizer, args)

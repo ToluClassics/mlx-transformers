@@ -46,6 +46,7 @@ ACT2FN = {
     "relu": nn.ReLU(),
     "relu2": ReLUSquaredActivation(),
     "gelu": nn.GELU(),
+    "gelu_pytorch_tanh": NewGELUActivation(),
     "silu": nn.SiLU(),
     "gelu_new": NewGELUActivation(),
     "swish": nn.SiLU(),

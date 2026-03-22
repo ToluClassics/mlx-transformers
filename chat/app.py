@@ -1,27 +1,65 @@
 import re
-import os
 import time
+import argparse
+from typing import Any, Tuple
 
 import mlx.core as mx
 import streamlit as st
-from mlx_transformers.models import Phi3ForCausalLM
+from mlx_transformers.models import (
+    Gemma3ForCausalLM,
+    LlamaForCausalLM,
+    OpenELMForCausalLM,
+    PersimmonForCausalLM,
+    Phi3ForCausalLM,
+    PhiForCausalLM,
+    Qwen3ForCausalLM,
+)
 from transformers import AutoConfig, AutoTokenizer
-import argparse
-from typing import Tuple, Any
 
 title = "MLX Transformer Chat"
 ver = "0.1.0"
 debug = False
 
-MODEL_2_CLASS = {
-    "microsoft-Phi-3-mini-128k-instruct": Phi3ForCausalLM,
-    "microsoft-Phi-3-mini-4k-instruct": Phi3ForCausalLM,
+ARCHITECTURE_2_CLASS = {
+    "Gemma3ForCausalLM": Gemma3ForCausalLM,
+    "LlamaForCausalLM": LlamaForCausalLM,
+    "OpenELMForCausalLM": OpenELMForCausalLM,
+    "PersimmonForCausalLM": PersimmonForCausalLM,
+    "Phi3ForCausalLM": Phi3ForCausalLM,
+    "PhiForCausalLM": PhiForCausalLM,
+    "Qwen3ForCausalLM": Qwen3ForCausalLM,
+}
+
+MODEL_TYPE_2_CLASS = {
+    "gemma3_text": Gemma3ForCausalLM,
+    "llama": LlamaForCausalLM,
+    "openelm": OpenELMForCausalLM,
+    "persimmon": PersimmonForCausalLM,
+    "phi": PhiForCausalLM,
+    "phi3": Phi3ForCausalLM,
+    "qwen3": Qwen3ForCausalLM,
 }
 
 
-def load_model(
-    model_name: str, tokenizer_name: str, mlx_model_class
-) -> Tuple[Any, AutoTokenizer]:
+def resolve_model_class(config) -> type[Any]:
+    architectures = getattr(config, "architectures", []) or []
+    for architecture in architectures:
+        if architecture in ARCHITECTURE_2_CLASS:
+            return ARCHITECTURE_2_CLASS[architecture]
+
+    model_type = getattr(config, "model_type", None)
+    if model_type in MODEL_TYPE_2_CLASS:
+        return MODEL_TYPE_2_CLASS[model_type]
+
+    raise ValueError(
+        "Unsupported chat model architecture. "
+        f"architectures={architectures!r}, model_type={model_type!r}. "
+        "Supported text model families are: gemma3_text, llama, openelm, "
+        "persimmon, phi, phi3, qwen3."
+    )
+
+
+def load_model(model_name: str, tokenizer_name: str) -> Tuple[Any, AutoTokenizer]:
     """
     Load a llama model and tokenizer from the given model name and weights.
 
@@ -35,16 +73,12 @@ def load_model(
         _type_: _description_
     """
     config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-    os.path.dirname(os.path.realpath(__file__))
 
+    mlx_model_class = resolve_model_class(config)
     model = mlx_model_class(config)
-    model.from_pretrained(
-        model_name,
-        huggingface_model_architecture="AutoModelForCausalLM",
-        trust_remote_code=True,
-    )
+    model.from_pretrained(model_name, trust_remote_code=True)
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
 
     return model, tokenizer
 
@@ -73,7 +107,7 @@ def generate(the_prompt, the_model):
                 # definitely ends with a stop word. stop generating
                 return
             else:
-                # if text ends with start of an end word, accumulate tokens and wait for the full word
+                # If text ends with the prefix of a stop word, keep buffering.
                 for i, _ in enumerate(sw, start=1):
                     if text[-i:].lower() == sw[:i]:
                         trim = -i
@@ -143,7 +177,11 @@ models_file = args.models
 assistant_greeting = "How may I help you?"
 
 with open(models_file, "r") as file:
-    model_refs = [line.strip() for line in file.readlines() if not line.startswith("#")]
+    model_refs = [
+        line.strip()
+        for line in file.readlines()
+        if line.strip() and not line.startswith("#")
+    ]
 
 model_refs = {k.strip(): v.strip() for k, v in [line.split("|") for line in model_refs]}
 
@@ -160,15 +198,12 @@ st.markdown(r"<style>.stDeployButton{display:none}</style>", unsafe_allow_html=T
 
 @st.cache_resource(show_spinner=True)
 def load_model_and_cache(ref):
-    # return load(ref, {"trust_remote_code": True})
     if "openelm" in ref.lower():
         tokenizer_name = "meta-llama/Llama-2-7b-hf"
     else:
         tokenizer_name = ref
 
-    model_class = MODEL_2_CLASS[ref.replace("/", "-")]
-
-    return load_model(ref, tokenizer_name, model_class)
+    return load_model(ref, tokenizer_name)
 
 
 model = None
@@ -195,16 +230,14 @@ if model_ref.strip() != "-":
         )
         tokenizer.chat_template = chat_template
     else:
-        chat_template = (
-            tokenizer.chat_template
-            or (
-                "{% for message in messages %}"
-                "{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}"
-                "{% endfor %}"
-                "{% if add_generation_prompt %}"
-                "{{ '<|im_start|>assistant\n' }}"
-                "{% endif %}"
-            )
+        chat_template = tokenizer.chat_template or (
+            "{% for message in messages %}"
+            "{{'<|im_start|>' + message['role'] + '\n'"
+            " + message['content'] + '<|im_end|>' + '\n'}}"
+            "{% endfor %}"
+            "{% if add_generation_prompt %}"
+            "{{ '<|im_start|>assistant\n' }}"
+            "{% endif %}"
         )
 
     supports_system_role = "system role not supported" not in chat_template.lower()
@@ -279,7 +312,7 @@ if model_ref.strip() != "-":
                 assistant_responses[-1] if assistant_responses else ""
             )
 
-            # remove last line completely, so it is regenerated correctly (in case it stopped mid-word or mid-number)
+            # Remove the last partial line so continuation can regenerate it.
             last_assistant_response_lines = last_assistant_response.split("\n")
             if len(last_assistant_response_lines) > 1:
                 last_assistant_response_lines.pop()
@@ -300,7 +333,7 @@ if model_ref.strip() != "-":
             )
             full_prompt = full_prompt.rstrip("\n")
 
-            # remove last assistant response from state, as it will be replaced with a continued one
+            # Replace the previous assistant turn with the continued one.
             remove_last_occurrence(
                 st.session_state.messages,
                 lambda msg: msg["role"] == "assistant"

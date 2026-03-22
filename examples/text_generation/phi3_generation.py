@@ -7,6 +7,28 @@ import mlx.core as mx
 from transformers import AutoTokenizer, AutoConfig
 
 from mlx_transformers.models import Phi3ForCausalLM as MlxPhi3ForCausalLM
+from common import get_eos_token_ids
+
+DEFAULT_SYSTEM_PROMPT = (
+    "You are Phi, a language model trained by Microsoft to help users. "
+    "Your role as an assistant involves thoroughly exploring questions through "
+    "a systematic thinking process before providing the final precise and "
+    "accurate solutions. This requires engaging in a comprehensive cycle of "
+    "analysis, summarizing, exploration, reassessment, reflection, "
+    "backtracing, and iteration to develop well-considered thinking process. "
+    "Please structure your response into two main sections: Thought and "
+    "Solution using the specified format: <think> {Thought section} </think> "
+    "{Solution section}. In the Thought section, detail your reasoning "
+    "process in steps. Each step should include detailed considerations such "
+    "as analysing questions, summarizing relevant findings, brainstorming new "
+    "ideas, verifying the accuracy of the current steps, refining any "
+    "errors, and revisiting previous steps. In the Solution section, based "
+    "on various attempts, explorations, and reflections from the Thought "
+    "section, systematically present the final solution that you deem "
+    "correct. The Solution section should be logical, accurate, and concise "
+    "and detail necessary steps needed to reach the conclusion. Now, try to "
+    "solve the following question through the above guidelines:"
+)
 
 
 def tic():
@@ -52,7 +74,10 @@ def load_model(
 
 def generate(model: MlxPhi3ForCausalLM, tokenizer: AutoTokenizer, args):
     print(args.prompt)
-    messages = [{"role": "user", "content": args.prompt}]
+    messages = [
+        {"role": "system", "content": args.system_prompt},
+        {"role": "user", "content": args.prompt},
+    ]
     inputs = tokenizer.apply_chat_template(
         messages,
         add_generation_prompt=True,
@@ -62,13 +87,7 @@ def generate(model: MlxPhi3ForCausalLM, tokenizer: AutoTokenizer, args):
     )
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
-    eos_token_ids = tokenizer.eos_token_id
-    if eos_token_ids is None:
-        eos_token_ids = set()
-    elif isinstance(eos_token_ids, int):
-        eos_token_ids = {eos_token_ids}
-    else:
-        eos_token_ids = set(eos_token_ids)
+    eos_token_ids = get_eos_token_ids(args.model_name, tokenizer)
     skip = 0
     prompt_processing = None
     tokens = []
@@ -112,6 +131,11 @@ if __name__ == "__main__":
         "--prompt",
         help="The message to be processed by the model.",
         default="In the beginning the Universe was created.",
+    )
+    parser.add_argument(
+        "--system-prompt",
+        help="The system prompt prepended to Phi requests.",
+        default=DEFAULT_SYSTEM_PROMPT,
     )
     parser.add_argument(
         "--max-tokens", "-m", type=int, default=100, help="How many tokens to generate"

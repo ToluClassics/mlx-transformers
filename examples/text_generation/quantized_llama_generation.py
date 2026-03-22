@@ -20,25 +20,28 @@ def toc(msg, start):
     return f"[INFO] {msg}: {end - start:.3f} s"
 
 
-def load_model(
-    model_name: str, mlx_model_class
-) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
+def load_model(model_name: str, args) -> Tuple[MlxLlamaForCausalLM, AutoTokenizer]:
     """
-    Load a llama model and tokenizer from the given model name and weights.
+    Load a quantized LLaMA model and tokenizer from Hugging Face.
 
     Args:
-        model_name (str): Name of the llama model to load
-        model_weights (str): Path to the model weights
-        hgf_model_class: Huggingface model class
-        mlx_model_class: Mlx model class
+        model_name: Name of the LLaMA checkpoint to load
+        args: Parsed CLI arguments controlling quantization
 
     Returns:
-        _type_: _description_
+        The quantized model and tokenizer
     """
     config = LlamaConfig.from_pretrained(model_name)
 
-    model = mlx_model_class(config)
-    model.from_pretrained(model_name)
+    model = MlxLlamaForCausalLM(config)
+    model.from_pretrained(
+        model_name,
+        quantize=True,
+        group_size=args.group_size,
+        bits=args.bits,
+        mode=args.mode,
+        quantize_input=args.quantize_input,
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -58,6 +61,7 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
 
     inputs = {key: mx.array(v) for key, v in inputs.items()}
     eos_token_ids = get_eos_token_ids(args.model_name, tokenizer)
+
     skip = 0
     prompt_processing = None
     tokens = []
@@ -75,7 +79,6 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
         tokens.append(token)
 
         if (len(tokens) % args.write_every) == 0:
-            # It is perfectly ok to eval things we have already eval-ed.
             mx.eval(tokens)
             s = tokenizer.decode([t.item() for t in tokens])
             print(s[skip:], end="", flush=True)
@@ -91,7 +94,7 @@ def generate(model: MlxLlamaForCausalLM, tokenizer: AutoTokenizer, args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Llama inference script")
+    parser = argparse.ArgumentParser(description="Quantized LLaMA inference script")
     parser.add_argument(
         "--model-name",
         help="The model name to load",
@@ -100,10 +103,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prompt",
         help="The message to be processed by the model.",
-        default="In the beginning the Universe was created.",
+        default="Write a short explanation of weight quantization.",
     )
     parser.add_argument(
-        "--max-tokens", "-m", type=int, default=1024, help="How many tokens to generate"
+        "--max-tokens", "-m", type=int, default=256, help="How many tokens to generate"
     )
     parser.add_argument(
         "--write-every", type=int, default=1, help="After how many tokens to detokenize"
@@ -112,12 +115,34 @@ if __name__ == "__main__":
         "--temp", type=float, default=0.0, help="The sampling temperature"
     )
     parser.add_argument("--seed", type=int, default=0, help="The PRNG seed")
+    parser.add_argument(
+        "--group-size",
+        type=int,
+        default=64,
+        help="Quantization group size passed to mlx.nn.quantize",
+    )
+    parser.add_argument(
+        "--bits",
+        type=int,
+        default=4,
+        help="Number of bits per quantized weight",
+    )
+    parser.add_argument(
+        "--mode",
+        default="affine",
+        help="Quantization mode, for example affine, mxfp4, nvfp4, or mxfp8",
+    )
+    parser.add_argument(
+        "--quantize-input",
+        action="store_true",
+        help="Quantize supported layer inputs; requires mode nvfp4 or mxfp8",
+    )
 
     args = parser.parse_args()
 
     mx.random.seed(args.seed)
     mx.set_default_device(mx.gpu)
 
-    model, tokenizer = load_model(args.model_name, MlxLlamaForCausalLM)
+    model, tokenizer = load_model(args.model_name, args)
 
     generate(model, tokenizer, args)
