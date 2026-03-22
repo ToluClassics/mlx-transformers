@@ -198,6 +198,27 @@ python examples/text_generation/qwen3_vl_generation.py \
 
 `--quantize-input` is only valid with `--mode nvfp4` or `--mode mxfp8`.
 
+### Gemma3 Image + Text Generation
+
+```bash
+python examples/text_generation/gemma3_generation.py \
+  --model-name google/gemma-3-4b-it \
+  --image-path /Users/odunayoogundepo/Desktop/screenshot.png \
+  --prompt "What is happening in this image?" \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
+### Gemma3 Text Generation
+
+```bash
+python examples/text_generation/gemma3_text_generation.py \
+  --model-name google/gemma-3-4b-it \
+  --prompt "Explain grouped-query attention in one paragraph." \
+  --max-tokens 128 \
+  --temp 0.0
+```
+
 ### NLLB / M2M-100 Translation
 
 ```bash
@@ -216,6 +237,11 @@ A Streamlit chat UI is included under `chat/`.
 cd chat
 bash start.sh
 ```
+
+Add or remove entries in `chat/models.txt` to control which models appear in the
+sidebar. The chat app now resolves supported text model families from the model
+config, including `phi`, `phi3`, `llama`, `qwen3`, `openelm`, `persimmon`, and
+`gemma3_text`.
 
 ![Chat Image](images/mlx_transformer_chat.png)
 

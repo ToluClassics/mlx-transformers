@@ -16,6 +16,7 @@ from .qwen3 import Qwen3ForCausalLM, Qwen3Model
 from .qwen3_vl import Qwen3VLForConditionalGeneration, Qwen3VLModel
 from .persimmon import PersimmonForCausalLM
 from .fuyu import FuyuForCausalLM
+from .gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration, Gemma3Model
 from .roberta import (
     RobertaForQuestionAnswering,
     RobertaForSequenceClassification,
