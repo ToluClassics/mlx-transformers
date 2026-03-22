@@ -1,4 +1,5 @@
 huggingface-hub>=0.22.2
+datasets>=2.19.0
 mlx>=0.31.0
 numpy>=1.26.4
 safetensors>=0.4.3
