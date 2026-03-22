@@ -2,9 +2,22 @@
 
 [![PyPI](https://img.shields.io/pypi/v/mlx-transformers?color=red)](https://pypi.org/project/mlx-transformers/)
 
-`mlx-transformers` provides MLX implementations of several Hugging Face-style model architectures for Apple Silicon. The project keeps a familiar Transformers-style API while loading weights from Hugging Face checkpoints and running inference with MLX.
+MLX implementations of Hugging Face-style models for Apple Silicon.
 
-The repository is currently inference-focused. Some model families have broader parity than others, but the core usage pattern is the same across the package:
+## Installation
+
+```bash
+pip install mlx-transformers
+```
+
+For local development:
+
+```bash
+pip install -r requirements.txt
+pip install -e .
+```
+
+## Quick Start
 
 ```python
 import mlx.core as mx
@@ -26,7 +39,7 @@ inputs = {k: mx.array(v) for k, v in inputs.items()}
 outputs = model(**inputs)
 ```
 
-Quantized loading is supported through the same loader:
+Quantized loading:
 
 ```python
 model.from_pretrained(
@@ -38,166 +51,25 @@ model.from_pretrained(
 )
 ```
 
-Pre-quantized MLX checkpoints can also be loaded directly without re-quantizing:
-
-```python
-model_name = "mlx-community/Phi-3-mini-4k-instruct-4bit"
-
-config = AutoConfig.from_pretrained(model_name)
-model = Phi3ForCausalLM(config)
-model.from_pretrained(model_name)
-```
-
-## Requirements
-
-- Apple Silicon Mac
-- Python 3.10+
-- MLX-compatible environment
-
-Some models are gated on Hugging Face. If needed, set `HF_TOKEN` in your environment before calling `from_pretrained(...)`.
-
-## Installation
-
-Install from PyPI:
-
-```bash
-pip install mlx-transformers
-```
-
-Install for local development:
-
-```bash
-pip install -r requirements.txt
-pip install -e .
-```
-
-`asitop` is also useful if you want to monitor GPU and CPU usage on Apple Silicon:
-
-```bash
-pip install asitop
-```
-
-## Available Models
-
-Current exports from `src/mlx_transformers/models/__init__.py`:
+## Supported Models
 
 - BERT
-  - `BertModel`
-  - `BertForMaskedLM`
-  - `BertForSequenceClassification`
-  - `BertForTokenClassification`
-  - `BertForQuestionAnswering`
 - RoBERTa
-  - `RobertaModel`
-  - `RobertaForSequenceClassification`
-  - `RobertaForTokenClassification`
-  - `RobertaForQuestionAnswering`
 - XLM-RoBERTa
-  - `XLMRobertaModel`
-  - `XLMRobertaForSequenceClassification`
-  - `XLMRobertaForTokenClassification`
-  - `XLMRobertaForQuestionAnswering`
-- Causal LMs
-  - `LlamaModel`, `LlamaForCausalLM`
-  - `PhiModel`, `PhiForCausalLM`
-  - `Phi3Model`, `Phi3ForCausalLM`
-  - `Qwen3Model`, `Qwen3ForCausalLM`
-  - `Qwen3VLModel`, `Qwen3VLForConditionalGeneration`
-  - `OpenELMModel`, `OpenELMForCausalLM`
-  - `PersimmonForCausalLM`
-  - `FuyuForCausalLM`
-- Translation
-  - `M2M100ForConditionalGeneration`
-
-### Text Generation Benchmarking
-
-The benchmark script measures prompt prefill time, decode time, and throughput
-for supported text-generation families and emits a markdown table suitable for
-the README.
-
-Supported benchmark families currently include `phi`, `phi3`, `llama`,
-`qwen3`, `openelm`, `persimmon`, and `gemma3_text`.
-
-When `--dataset ultrachat` is set, the script samples prompts from
-`HuggingFaceH4/ultrachat_200k` and benchmarks each token-length bucket
-separately.
-
-Example results:
-
-| Label | Hugging Face model | Bucket | Samples | Prompt tokens | New tokens | Prefill (s) | Prefill tok/s | Decode (s) | Decode tok/s | Full (s) |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| phi3 | microsoft/Phi-3-mini-4k-instruct | 1-128 | 30 | 97 | 107 | 0.151 | 674.42 | 5.985 | 17.63 | 6.135 |
-| phi3 | microsoft/Phi-3-mini-4k-instruct | 129-512 | 30 | 397 | 96 | 0.654 | 840.55 | 8.636 | 13.11 | 9.290 |
-
-<details>
-<summary>Benchmark commands</summary>
-
-Generic multi-model run:
-
-```bash
-python examples/text_generation/benchmark_generation.py \
-  --model phi3=microsoft/Phi-3-mini-4k-instruct \
-  --model qwen3=Qwen/Qwen3-0.6B \
-  --model openelm=apple/OpenELM-1_1B-Instruct \
-  --dataset ultrachat \
-  --bucket 1:128 \
-  --bucket 129:512 \
-  --bucket 513:1024 \
-  --bucket 1025:2048 \
-  --max-tokens 128 \
-  --runs 3 \
-  --warmup-runs 1 \
-  --output-file benchmark_results.md
-```
-
-Phi-3 4k run used for the table above:
-
-```bash
-python examples/text_generation/benchmark_generation.py \
-  --model phi3=microsoft/Phi-3-mini-4k-instruct \
-  --dataset ultrachat \
-  --bucket 1:128 \
-  --bucket 129:512 \
-  --output-file benchmark_results-phi3-4k.md \
-  --samples-per-bucket 10
-```
-
-</details>
+- LLaMA
+- Phi
+- Phi-3
+- Qwen3
+- Qwen3-VL
+- OpenELM
+- Persimmon
+- Fuyu
+- Gemma3
+- M2M100 / NLLB
 
 ## Examples
 
-### Sentence Embeddings with BERT
-
-```bash
-python examples/bert/sentence_transformers.py
-```
-
-### LLaMA Text Generation
-
-The LLaMA example now formats the input with the tokenizer chat template and stops on EOS.
-
-```bash
-python examples/text_generation/llama_generation.py \
-  --model-name meta-llama/Llama-3.2-1B-Instruct \
-  --prompt "Write a short explanation of rotary embeddings." \
-  --max-tokens 128 \
-  --temp 0.0
-```
-
-### Quantized LLaMA Text Generation
-
-```bash
-python examples/text_generation/quantized_llama_generation.py \
-  --model-name meta-llama/Llama-3.2-1B-Instruct \
-  --prompt "Explain why 4-bit quantization can reduce memory usage." \
-  --bits 4 \
-  --group-size 64 \
-  --mode affine \
-  --max-tokens 128 \
-  --temp 0.0
-```
-
-### Phi-3 Text Generation
+Phi-3:
 
 ```bash
 python examples/text_generation/phi3_generation.py \
@@ -207,147 +79,45 @@ python examples/text_generation/phi3_generation.py \
   --temp 0.0
 ```
 
-### OpenELM Text Generation
-
-```bash
-python examples/text_generation/openelm_generation.py \
-  --model-name apple/OpenELM-1_1B-Instruct \
-  --prompt "Summarize grouped-query attention." \
-  --max-tokens 128
-```
-
-### Qwen3 Text Generation
-
-```bash
-python examples/text_generation/qwen3_generation.py \
-  --model-name Qwen/Qwen3-0.6B \
-  --prompt "Explain grouped-query attention in one paragraph." \
-  --max-tokens 128 \
-  --temp 0.0
-```
-
-### Qwen3-VL Image + Text Generation
+Qwen3-VL:
 
 ```bash
 python examples/text_generation/qwen3_vl_generation.py \
   --model-name Qwen/Qwen3-VL-2B-Instruct \
   --image-url "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/transformers/tasks/car.jpg" \
-  --prompt "Describe the image and mention the likely setting." \
+  --prompt "Describe the image." \
   --max-tokens 128 \
   --temp 0.0
 ```
 
-### Quantized Qwen3-VL Image + Text Generation
-
-```bash
-python examples/text_generation/qwen3_vl_generation.py \
-  --model-name Qwen/Qwen3-VL-2B-Instruct \
-  --image-path /Users/odunayoogundepo/Desktop/screenshot.png \
-  --prompt "What is happening in this image?" \
-  --max-tokens 1048 \
-  --temp 0.0 \
-  --quantize \
-  --mode nvfp4 \
-  --quantize-input
-```
-
-`--quantize-input` is only valid with `--mode nvfp4` or `--mode mxfp8`.
-
-### Gemma3 Image + Text Generation
-
-```bash
-python examples/text_generation/gemma3_generation.py \
-  --model-name google/gemma-3-4b-it \
-  --image-path /Users/odunayoogundepo/Desktop/screenshot.png \
-  --prompt "What is happening in this image?" \
-  --max-tokens 128 \
-  --temp 0.0
-```
-
-### Gemma3 Text Generation
-
-```bash
-python examples/text_generation/gemma3_text_generation.py \
-  --model-name google/gemma-3-4b-it \
-  --prompt "Explain grouped-query attention in one paragraph." \
-  --max-tokens 128 \
-  --temp 0.0
-```
-
-
-
-### NLLB / M2M-100 Translation
+NLLB:
 
 ```bash
 python examples/translation/nllb_translation.py \
   --model_name facebook/nllb-200-distilled-600M \
+  --revision refs/pr/45 \
   --source_language English \
   --target_language Yoruba \
   --text_to_translate "Let us translate text to Yoruba"
 ```
 
-## Chat Interface
-
-A Streamlit chat UI is included under `chat/`.
+Chat UI:
 
 ```bash
 cd chat
 bash start.sh
 ```
 
-Add or remove entries in `chat/models.txt` to control which models appear in the
-sidebar. The chat app now resolves supported text model families from the model
-config, including `phi`, `phi3`, `llama`, `qwen3`, `openelm`, `persimmon`, and
-`gemma3_text`.
+Benchmark:
 
-![Chat Image](images/mlx_transformer_chat.png)
+```bash
+python examples/text_generation/benchmark_generation.py --help
+```
 
 ## Tests
-
-The repository currently includes focused tests for:
-
-- BERT
-- RoBERTa
-- XLM-RoBERTa
-- LLaMA
-- Phi
-- Phi-3
-
-Run the full test suite:
 
 ```bash
 python -m unittest
 ```
 
-Run a single module:
-
-```bash
-python -m unittest tests.test_bert
-python -m unittest tests.test_llama
-```
-
-Some tests download model weights from Hugging Face on first run.
-
-## Repository Layout
-
-```text
-src/mlx_transformers/models/   model implementations and shared helpers
-examples/                      runnable examples
-tests/                         model parity and behavior tests
-chat/                          streamlit chat interface
-```
-
-## Notes
-
-- Model loading is handled through `from_pretrained(...)` in `src/mlx_transformers/models/base.py`.
-- Pretrained models are loaded in eval mode by default.
-- Causal generation support is present for the decoder-style model families, but parity and feature coverage still vary by architecture.
-
-## Contributing
-
-Contributions are welcome. The highest-value contributions are usually:
-
-- new model implementations
-- parity fixes against Hugging Face behavior
-- generation and cache correctness fixes
-- tests for unsupported or weakly covered paths
+Some models are gated on Hugging Face. Set `HF_TOKEN` if needed.

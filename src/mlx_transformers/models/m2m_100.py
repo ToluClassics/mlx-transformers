@@ -6,11 +6,10 @@ from typing import Optional, Tuple
 import mlx.core as mx
 import mlx.nn as nn
 import numpy as np
-import torch
 from transformers import M2M100Config
-from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
 
 from .base import MlxPretrainedMixin
+from .utils import ACT2FN
 
 
 def _prepare_4d_attention_mask(mask: mx.array, tgt_len: Optional[int] = None):
@@ -29,6 +28,43 @@ def _prepare_4d_attention_mask(mask: mx.array, tgt_len: Optional[int] = None):
     inverted_mask = np.ma.array(data=inverted_mask, mask=inverted_mask)
     inverted_mask = inverted_mask.filled(fill_value=-np.inf)
     return mx.array(inverted_mask)
+
+
+def _prepare_4d_causal_attention_mask(
+    attention_mask: Optional[mx.array],
+    input_shape: Tuple[int, int],
+    past_key_values_length: int = 0,
+):
+    """Create a causal decoder mask without relying on transformers internals."""
+
+    bsz, tgt_len = input_shape
+    src_len = tgt_len + past_key_values_length
+
+    query_positions = np.arange(tgt_len)[:, None] + past_key_values_length
+    key_positions = np.arange(src_len)[None, :]
+    causal_mask = np.where(key_positions <= query_positions, 0.0, -np.inf)
+    causal_mask = np.broadcast_to(causal_mask, (bsz, 1, tgt_len, src_len))
+
+    if attention_mask is None:
+        return mx.array(causal_mask)
+
+    attention_mask = np.array(attention_mask)
+    if attention_mask.shape[1] != src_len:
+        if attention_mask.shape[1] == tgt_len and past_key_values_length > 0:
+            prefix = np.ones(
+                (attention_mask.shape[0], past_key_values_length),
+                dtype=attention_mask.dtype,
+            )
+            attention_mask = np.concatenate([prefix, attention_mask], axis=1)
+        else:
+            raise ValueError(
+                "Decoder attention mask should have shape "
+                f"({bsz}, {src_len}), but is {attention_mask.shape}."
+            )
+
+    padding_mask = 1.0 - attention_mask[:, None, None, :]
+    padding_mask = np.where(padding_mask.astype(bool), -np.inf, 0.0)
+    return mx.array(causal_mask + padding_mask)
 
 
 def create_position_ids_from_input_ids(
@@ -61,13 +97,31 @@ class M2M100SinusoidalPositionalEmbedding(nn.Module):
         self.weight = self.make_weights(
             num_positions + self.offset, embedding_dim, padding_idx
         )
-        self.weights = nn.SinusoidalPositionalEncoding(embedding_dim)
 
-    def __call__(self, input_ids: mx.array, past_key_values_length: int = 0):
-        bsz, seq_len = input_ids.shape
-        position_ids = create_position_ids_from_input_ids(
-            input_ids, self.padding_idx, past_key_values_length
-        )
+    def __call__(
+        self,
+        input_ids: Optional[mx.array] = None,
+        inputs_embeds: Optional[mx.array] = None,
+        past_key_values_length: int = 0,
+    ):
+        if input_ids is not None:
+            bsz, seq_len = input_ids.shape
+            position_ids = self.create_position_ids_from_input_ids(
+                input_ids, self.padding_idx, past_key_values_length
+            )
+        elif inputs_embeds is not None:
+            bsz, seq_len = inputs_embeds.shape[:-1]
+            position_ids = self.create_position_ids_from_inputs_embeds(
+                inputs_embeds, past_key_values_length, self.padding_idx
+            )
+        else:
+            raise ValueError("Either input_ids or inputs_embeds must be provided.")
+
+        max_pos = self.padding_idx + 1 + seq_len + past_key_values_length
+        if max_pos > self.weight.shape[0]:
+            self.weight = self.make_weights(
+                max_pos + self.offset, self.embedding_dim, self.padding_idx
+            )
 
         position_ids = position_ids.reshape(-1)
         output = mx.take(self.weight, position_ids, 0).reshape(
@@ -101,6 +155,26 @@ class M2M100SinusoidalPositionalEmbedding(nn.Module):
 
         return emb
 
+    @staticmethod
+    def create_position_ids_from_input_ids(
+        input_ids, padding_idx, past_key_values_length=0
+    ):
+        return create_position_ids_from_input_ids(
+            input_ids, padding_idx, past_key_values_length
+        )
+
+    @staticmethod
+    def create_position_ids_from_inputs_embeds(
+        inputs_embeds, past_key_values_length, padding_idx
+    ):
+        input_shape = inputs_embeds.shape[:-1]
+        sequence_length = input_shape[1]
+        position_ids = mx.arange(
+            padding_idx + 1, sequence_length + padding_idx + 1, dtype=mx.int64
+        )
+        position_ids = mx.expand_dims(position_ids, axis=0)
+        return mx.broadcast_to(position_ids, input_shape) + past_key_values_length
+
 
 class M2M100Attention(nn.Module):
     def __init__(
@@ -111,16 +185,20 @@ class M2M100Attention(nn.Module):
         is_decoder: bool = False,
         bias: bool = True,
         is_causal: bool = False,
-        args: M2M100Config = None,
+        config: M2M100Config = None,
     ):
         super().__init__()
-        self.args = args
-
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
-
         self.head_dim = embed_dim // num_heads
+        self.config = config
+
+        if (self.head_dim * num_heads) != self.embed_dim:
+            raise ValueError(
+                f"embed_dim must be divisible by num_heads (got embed_dim={self.embed_dim} "
+                f"and num_heads={num_heads})."
+            )
 
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
@@ -147,8 +225,9 @@ class M2M100Attention(nn.Module):
         is_cross_attention = key_value_states is not None
 
         bsz, tgt_len, _ = hidden_states.shape
+        src_len = key_value_states.shape[1] if is_cross_attention else tgt_len
 
-        query_states = self.q_proj(hidden_states) * self.scaling
+        query_states = self.q_proj(hidden_states)
 
         if (
             is_cross_attention
@@ -172,41 +251,28 @@ class M2M100Attention(nn.Module):
         if self.is_decoder:
             past_key_value = (key_states, value_states)
 
-        proj_shape = (bsz * self.num_heads, -1, self.head_dim)
+        query_states = self._shape(query_states, tgt_len, bsz)
+        attn_weights = (query_states @ key_states.transpose(0, 1, 3, 2)) * self.scaling
 
-        query_states = self._shape(query_states, tgt_len, bsz).reshape(proj_shape)
-        key_states = key_states.reshape(proj_shape)
-        value_states = value_states.reshape(proj_shape)
-
-        src_len = key_states.shape[1]
-        attn_weights = query_states @ key_states.transpose(0, 2, 1)
-
-        if attn_weights.shape != (bsz * self.num_heads, tgt_len, src_len):
+        expected_shape = (bsz, self.num_heads, tgt_len, src_len)
+        if attn_weights.shape != expected_shape:
             raise ValueError(
-                f"Weights should be of size {(bsz * self.num_heads, tgt_len, src_len)}"
+                f"Weights should be of size {expected_shape}"
                 f", but is {attn_weights.shape}"
             )
 
         if attention_mask is not None:
-            if attention_mask.shape != (bsz, 1, tgt_len, src_len):
+            expected_mask_shape = (bsz, 1, tgt_len, src_len)
+            if attention_mask.shape != expected_mask_shape:
                 raise ValueError(
-                    f"Attention mask should be of size {(bsz, 1, tgt_len, src_len)}, "
-                    "but is {attention_mask.shape}"
+                    f"Attention mask should be of size {expected_mask_shape}, "
+                    f"but is {attention_mask.shape}"
                 )
-
-            attn_weights = (
-                attn_weights.reshape(bsz, self.num_heads, tgt_len, src_len)
-                + attention_mask
-            )
-            attn_weights = attn_weights.reshape(bsz * self.num_heads, tgt_len, src_len)
+            attn_weights = attn_weights + attention_mask
 
         attn_weights = mx.softmax(attn_weights, axis=-1).astype(attn_weights.dtype)
-
-        attn_outputs = attn_weights @ value_states
-
-        attn_output = attn_outputs.reshape(bsz, self.num_heads, tgt_len, self.head_dim)
+        attn_output = attn_weights @ value_states
         attn_output = attn_output.transpose(0, 2, 1, 3)
-
         attn_output = attn_output.reshape(bsz, tgt_len, self.embed_dim)
         attn_output = self.out_proj(attn_output)
 
@@ -222,19 +288,17 @@ class M2M100EncoderLayer(nn.Module):
             embed_dim=self.embed_dim,
             num_heads=config.encoder_attention_heads,
             dropout=config.attention_dropout,
-            args=config,
+            config=config,
         )
-
+        self.dropout = config.dropout
         self.self_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-
-        if config.activation_function == "gelu":
-            self.activation_fn = nn.GELU()
-        elif config.activation_function == "relu":
-            self.activation_fn = nn.ReLU()
-
+        self.activation_fn = ACT2FN[config.activation_function]
+        self.activation_dropout = config.activation_dropout
         self.fc1 = nn.Linear(self.embed_dim, config.encoder_ffn_dim)
         self.fc2 = nn.Linear(config.encoder_ffn_dim, self.embed_dim)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
+        self.residual_dropout = nn.Dropout(self.dropout)
+        self.activation_dropout_layer = nn.Dropout(self.activation_dropout)
 
     def __call__(self, hidden_states: mx.array, attention_mask: mx.array):
         residual = hidden_states
@@ -242,14 +306,21 @@ class M2M100EncoderLayer(nn.Module):
         hidden_states = self.self_attn_layer_norm(hidden_states)
 
         hidden_states = self.self_attn(hidden_states, attention_mask=attention_mask)
+        hidden_states = self.residual_dropout(hidden_states)
         hidden_states = hidden_states + residual
 
         residual = hidden_states
         hidden_states = self.final_layer_norm(hidden_states)
 
         hidden_states = self.activation_fn(self.fc1(hidden_states))
+        hidden_states = self.activation_dropout_layer(hidden_states)
         hidden_states = self.fc2(hidden_states)
+        hidden_states = self.residual_dropout(hidden_states)
         hidden_states = hidden_states + residual
+
+        if hidden_states.dtype == mx.float16:
+            clamp_value = np.finfo(np.float16).max - 1000
+            hidden_states = mx.clip(hidden_states, -clamp_value, clamp_value)
 
         return hidden_states
 
@@ -265,28 +336,26 @@ class M2M100DecoderLayer(nn.Module):
             dropout=config.attention_dropout,
             is_decoder=True,
             is_causal=True,
-            args=config,
+            config=config,
         )
-
+        self.dropout = config.dropout
+        self.activation_dropout = config.activation_dropout
         self.self_attn_layer_norm = nn.LayerNorm(self.embed_dim)
         self.encoder_attn = M2M100Attention(
             embed_dim=self.embed_dim,
             num_heads=config.decoder_attention_heads,
             dropout=config.attention_dropout,
             is_decoder=True,
-            args=config,
+            config=config,
         )
 
         self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-
-        if config.activation_function == "gelu":
-            self.activation_fn = nn.GELU()
-        elif config.activation_function == "relu":
-            self.activation_fn = nn.ReLU()
-
+        self.activation_fn = ACT2FN[config.activation_function]
         self.fc1 = nn.Linear(self.embed_dim, config.decoder_ffn_dim)
         self.fc2 = nn.Linear(config.decoder_ffn_dim, self.embed_dim)
         self.final_layer_norm = nn.LayerNorm(self.embed_dim)
+        self.residual_dropout = nn.Dropout(self.dropout)
+        self.activation_dropout_layer = nn.Dropout(self.activation_dropout)
 
     def __call__(
         self,
@@ -310,6 +379,7 @@ class M2M100DecoderLayer(nn.Module):
             attention_mask=attention_mask,
             past_key_value=self_attn_past_key_value,
         )
+        hidden_states = self.residual_dropout(hidden_states)
         hidden_states = hidden_states + residual
 
         if encoder_hidden_states is not None:
@@ -322,14 +392,21 @@ class M2M100DecoderLayer(nn.Module):
                 attention_mask=encoder_attention_mask,
                 past_key_value=None,
             )
+            hidden_states = self.residual_dropout(hidden_states)
             hidden_states = hidden_states + residual
 
         residual = hidden_states
         hidden_states = self.final_layer_norm(hidden_states)
         hidden_states = self.activation_fn(self.fc1(hidden_states))
+        hidden_states = self.activation_dropout_layer(hidden_states)
         hidden_states = self.fc2(hidden_states)
-
+        hidden_states = self.residual_dropout(hidden_states)
         hidden_states = hidden_states + residual
+
+        if hidden_states.dtype == mx.float16:
+            clamp_value = np.finfo(np.float16).max - 1000
+            hidden_states = mx.clip(hidden_states, -clamp_value, clamp_value)
+
         return hidden_states
 
 
@@ -341,6 +418,8 @@ class M2M100Encoder(nn.Module):
         self.padding_idx = config.pad_token_id
         self.max_source_positions = config.max_position_embeddings
         self.embed_scale = math.sqrt(embed_dim) if config.scale_embedding else 1.0
+        self.dropout = config.dropout
+        self.layerdrop = config.encoder_layerdrop
 
         self.embed_tokens = (
             nn.Embedding(config.vocab_size, embed_dim)
@@ -353,6 +432,7 @@ class M2M100Encoder(nn.Module):
 
         self.layers = [M2M100EncoderLayer(config) for _ in range(config.encoder_layers)]
         self.layer_norm = nn.LayerNorm(embed_dim)
+        self.dropout_layer = nn.Dropout(self.dropout)
 
     def __call__(self, input_ids: mx.array, attention_mask: mx.array):
         input_shape = input_ids.shape
@@ -360,14 +440,23 @@ class M2M100Encoder(nn.Module):
 
         inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
-        embed_pos = self.embed_positions(input_ids)
+        embed_pos = self.embed_positions(
+            input_ids=input_ids, inputs_embeds=inputs_embeds
+        )
 
         hidden_states = inputs_embeds + embed_pos
+        hidden_states = self.dropout_layer(hidden_states)
 
         if attention_mask is not None:
             attention_mask = _prepare_4d_attention_mask(attention_mask)
 
-        for _, layer in enumerate(self.layers):
+        for layer in self.layers:
+            if (
+                self.training
+                and self.layerdrop > 0
+                and np.random.random() < self.layerdrop
+            ):
+                continue
             layer_output = layer(hidden_states, attention_mask)
             hidden_states = layer_output
 
@@ -383,6 +472,8 @@ class M2M100Decoder(nn.Module):
         self.padding_idx = config.pad_token_id
         self.max_target_positions = config.max_position_embeddings
         self.embed_scale = math.sqrt(embed_dim) if config.scale_embedding else 1.0
+        self.dropout = config.dropout
+        self.layerdrop = config.decoder_layerdrop
 
         self.embed_tokens = (
             nn.Embedding(config.vocab_size, embed_dim)
@@ -395,6 +486,7 @@ class M2M100Decoder(nn.Module):
 
         self.layers = [M2M100DecoderLayer(config) for _ in range(config.decoder_layers)]
         self.layer_norm = nn.LayerNorm(embed_dim)
+        self.dropout_layer = nn.Dropout(self.dropout)
 
     def __call__(
         self,
@@ -415,25 +507,33 @@ class M2M100Decoder(nn.Module):
 
         # create causal mask
         # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-        # TODO: Fix this
         combined_attention_mask = _prepare_4d_causal_attention_mask(
-            torch.tensor(np.array(attention_mask)),
+            attention_mask,
             input_shape,
-            torch.tensor(np.array(inputs_embeds)),
             past_key_values_length,
         )
-        combined_attention_mask = mx.array(combined_attention_mask.numpy())
 
-        if attention_mask is not None:
+        if encoder_attention_mask is not None:
             encoder_attention_mask = _prepare_4d_attention_mask(
                 encoder_attention_mask, tgt_len=input_shape[-1]
             )
 
-        embed_pos = self.embed_positions(input_ids)
+        embed_pos = self.embed_positions(
+            input_ids=input_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values_length=past_key_values_length,
+        )
 
         hidden_states = inputs_embeds + embed_pos
+        hidden_states = self.dropout_layer(hidden_states)
 
         for layer in self.layers:
+            if (
+                self.training
+                and self.layerdrop > 0
+                and np.random.random() < self.layerdrop
+            ):
+                continue
             layer_output = layer(
                 hidden_states,
                 combined_attention_mask,
@@ -462,15 +562,15 @@ class M2M100Model(nn.Module):
         input_ids: mx.array,
         attention_mask: mx.array,
         decoder_input_ids: mx.array,
-        encoder_attention_mask: mx.array,
         decoder_attention_mask: mx.array,
-        past_key_values: mx.array,
+        encoder_attention_mask: Optional[mx.array] = None,
+        past_key_values: Optional[mx.array] = None,
     ):
         encoder_hidden_states = self.encoder(input_ids, attention_mask)
         decoder_hidden_states = self.decoder(
             decoder_input_ids,
-            encoder_hidden_states,
             decoder_attention_mask,
+            encoder_hidden_states,
             encoder_attention_mask,
             past_key_values,
         )
@@ -495,8 +595,8 @@ class M2M100ForConditionalGeneration(nn.Module, MlxPretrainedMixin):
     def decode(
         self,
         decoder_input_ids,
-        encoder_hidden_states,
         attention_mask,
+        encoder_hidden_states,
         encoder_attention_mask,
         past_key_values,
     ):
@@ -506,8 +606,8 @@ class M2M100ForConditionalGeneration(nn.Module, MlxPretrainedMixin):
 
         return self.model.decoder(
             decoder_input_ids,
-            encoder_hidden_states,
             attention_mask,
+            encoder_hidden_states,
             encoder_attention_mask,
             past_key_values,
         )

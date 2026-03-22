@@ -245,6 +245,17 @@ class MlxPretrainedMixin:
                     if biases_key in tensors:
                         tensors["lm_head.biases"] = tensors[biases_key]
 
+            if "lm_head.weight" in tensors:
+                for candidate in (
+                    "model.shared.weight",
+                    "model.encoder.embed_tokens.weight",
+                    "model.decoder.embed_tokens.weight",
+                    "model.embed_tokens.weight",
+                    "model.language_model.embed_tokens.weight",
+                ):
+                    if candidate in missing_keys:
+                        tensors[candidate] = tensors["lm_head.weight"]
+
         self._apply_pretrained_tensors(tensors)
         if should_quantize and not prequantized_checkpoint:
             if quantize_input and class_predicate is None:

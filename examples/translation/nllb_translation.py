@@ -48,22 +48,43 @@ def top_p_sampling(logits: mx.array, top_p: float, temperature: float) -> mx.arr
 
 
 def load_mlx_nllb_model(
-    model_name: str, source_language: str, target_language: str
+    model_name: str,
+    source_language: str,
+    target_language: str,
+    tokenizer_name: str | None = None,
+    revision: str = "main",
+    tokenizer_revision: str | None = None,
 ) -> Tuple[MlxM2M100ForConditionalGeneration, PreTrainedTokenizerBase, int]:
     """
-    Load a nllb model and tokenizer from the given model name and weights path.
+    Load an MLX NLLB model and tokenizer.
     """
-    if source_language in FLORES_CODES and target_language in FLORES_CODES:
-        source_language = FLORES_CODES[source_language]
-        target_language = FLORES_CODES[target_language]
+    source_language = FLORES_CODES.get(source_language, source_language)
+    target_language = FLORES_CODES.get(target_language, target_language)
+    tokenizer_name = tokenizer_name or model_name
+    tokenizer_revision = tokenizer_revision or revision
 
-    config = M2M100Config.from_pretrained(model_name)
+    config = M2M100Config.from_pretrained(model_name, revision=revision)
 
     model = MlxM2M100ForConditionalGeneration(config)
-    model.from_pretrained(model_name)
+    try:
+        model.from_pretrained(model_name, revision=revision)
+    except ValueError as exc:
+        if "No .safetensors files found" in str(exc):
+            raise ValueError(
+                "The translation example expects MLX weights in .safetensors format. "
+                f"'{model_name}' at revision '{revision}' does not provide MLX "
+                ".safetensors files. "
+                "Use an MLX-converted NLLB/M2M100 checkpoint or a local directory "
+                "containing MLX .safetensors weights. If the safetensors live on a "
+                "different revision, pass it with --revision."
+            ) from exc
+        raise
 
     tokenizer = NllbTokenizer.from_pretrained(
-        model_name, src_lang=source_language, tgt_lang=target_language
+        tokenizer_name,
+        revision=tokenizer_revision,
+        src_lang=source_language,
+        tgt_lang=target_language,
     )
 
     tgt_token_id = tokenizer.convert_tokens_to_ids(target_language)
@@ -118,16 +139,19 @@ def run_translation_mlx(
 
     tokens = {key: mx.array(v) for key, v in tokens.items()}
 
-    decoder_input_ids = mx.array(
-        [[model.config.eos_token_id, target_language_token]] * bsz
+    decoder_start_token_id = (
+        model.config.decoder_start_token_id
+        if model.config.decoder_start_token_id is not None
+        else model.config.eos_token_id
     )
-    decoder_input_mask = mx.array([[1, 1]] * bsz)
+    decoder_input_ids = mx.array([[decoder_start_token_id]] * bsz)
+    decoder_input_mask = mx.array([[1]] * bsz)
 
     encoder_tokens = model.encode(tokens["input_ids"], tokens["attention_mask"])
 
     start_time = time.time()  # Start measuring time
 
-    for _ in range(max_generation_tokens):
+    for step in range(max_generation_tokens):
         outputs = model.decode(
             decoder_input_ids,
             decoder_input_mask,
@@ -137,7 +161,10 @@ def run_translation_mlx(
         )
         logits = model.lm_head(outputs)[:, -1, :]
 
-        next_token, _ = sample(logits, temp, top_p)
+        if step == 0:
+            next_token = mx.array([target_language_token] * bsz)
+        else:
+            next_token, _ = sample(logits, temp, top_p)
 
         decoder_input_ids = mx.concatenate(
             [decoder_input_ids, next_token.reshape(-1, 1)], axis=1
@@ -152,14 +179,14 @@ def run_translation_mlx(
     end_time = time.time()  # Stop measuring time
 
     if verbose:
-        total_tokens = decoder_input_ids.size - (bsz * 2)
+        total_tokens = decoder_input_ids.size - bsz
         total_time = end_time - start_time
         token_per_sec = total_tokens / total_time
         print(f"Generated {total_tokens} tokens in {total_time} seconds.")
         print(f"Token/s: {token_per_sec}")
 
     translated_sentences = tokenizer.batch_decode(
-        np.array(decoder_input_ids), skip_special_tokens=True
+        np.array(decoder_input_ids[:, 1:]), skip_special_tokens=True
     )
 
     return translated_sentences
@@ -170,6 +197,9 @@ def main(args):
         model_name=args.model_name,
         source_language=args.source_language,
         target_language=args.target_language,
+        tokenizer_name=args.tokenizer_name,
+        revision=args.revision,
+        tokenizer_revision=args.tokenizer_revision,
     )
 
     text_to_translate = args.text_to_translate
@@ -188,12 +218,35 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name", type=str, required=True)
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        required=True,
+        help="MLX model repo or local directory containing .safetensors weights.",
+    )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        default=None,
+        help="Optional tokenizer repo/path. Defaults to --model_name.",
+    )
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default="main",
+        help="Model/config revision on Hugging Face. Example: refs/pr/45.",
+    )
+    parser.add_argument(
+        "--tokenizer_revision",
+        type=str,
+        default=None,
+        help="Optional tokenizer revision. Defaults to --revision.",
+    )
     parser.add_argument("--source_language", type=str, required=True)
     parser.add_argument("--target_language", type=str, required=True)
     parser.add_argument(
         "--text_to_translate", type=str, default="Let us translate text to Yoruba"
     )
-    parser.add_argument("--max_generation_tokens", type=int, default=20)
+    parser.add_argument("--max_generation_tokens", type=int, default=128)
     args = parser.parse_args()
     main(args)
