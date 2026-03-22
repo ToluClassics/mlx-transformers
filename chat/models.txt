@@ -1,3 +1,7 @@
 - | Choose a model
 microsoft/Phi-3-mini-128k-instruct | 🤖 Phi 3 mini 128k instruct
 microsoft/Phi-3-mini-4k-instruct | 🤖 Phi 3 mini 4k instruct
+Qwen/Qwen3-0.6B | 🌐 Qwen3 0.6B
+apple/OpenELM-1_1B-Instruct | 🍎 OpenELM 1.1B instruct
+google/gemma-3-4b-it | 💎 Gemma 3 4B IT
+meta-llama/Llama-3.2-1B-Instruct | 🦙 Llama 3.2 1B instruct
