@@ -211,9 +211,9 @@ class RobertaAttention(nn.Module):
             output_attentions,
         )
         attention_output = self.output(self_outputs[0], hidden_states)
-        outputs = (
-            attention_output,
-        ) + self_outputs[1:]  # add attentions if we output them
+        outputs = (attention_output,) + self_outputs[
+            1:
+        ]  # add attentions if we output them
         return outputs
 
 
@@ -513,13 +513,21 @@ class RobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
 
         loss = None
         if labels is not None:
-            # move labels to correct device to enable model parallelism
-            labels = labels.to(logits.device)
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
                 elif self.num_labels > 1 and (
-                    labels.dtype == mx.long or labels.dtype == mx.int
+                    labels.dtype
+                    in (
+                        mx.int8,
+                        mx.int16,
+                        mx.int32,
+                        mx.int64,
+                        mx.uint8,
+                        mx.uint16,
+                        mx.uint32,
+                        mx.uint64,
+                    )
                 ):
                     self.config.problem_type = "single_label_classification"
                 else:
@@ -528,15 +536,17 @@ class RobertaForSequenceClassification(nn.Module, MlxPretrainedMixin):
             if self.config.problem_type == "regression":
                 loss_fct = nn.losses.mse_loss
                 if self.num_labels == 1:
-                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                    loss = mx.mean(loss_fct(logits.squeeze(), labels.squeeze()))
                 else:
-                    loss = loss_fct(logits, labels)
+                    loss = mx.mean(loss_fct(logits, labels))
             elif self.config.problem_type == "single_label_classification":
                 loss_fct = nn.losses.cross_entropy
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+                loss = mx.mean(
+                    loss_fct(logits.reshape(-1, self.num_labels), labels.reshape(-1))
+                )
             elif self.config.problem_type == "multi_label_classification":
                 loss_fct = nn.losses.binary_cross_entropy
-                loss = loss_fct(logits, labels)
+                loss = mx.mean(loss_fct(logits, labels))
 
         if not return_dict:
             output = (logits,) + outputs[2:]
@@ -597,10 +607,10 @@ class RobertaForTokenClassification(nn.Module, MlxPretrainedMixin):
 
         loss = None
         if labels is not None:
-            # move labels to correct device to enable model parallelism
-            labels = labels.to(logits.device)
             loss_fct = nn.losses.cross_entropy
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            loss = mx.mean(
+                loss_fct(logits.reshape(-1, self.num_labels), labels.reshape(-1))
+            )
 
         if not return_dict:
             output = (logits,) + outputs[2:]
@@ -659,20 +669,17 @@ class RobertaForQuestionAnswering(nn.Module, MlxPretrainedMixin):
 
         total_loss = None
         if start_positions is not None and end_positions is not None:
-            # If we are on multi-GPU, split add a dimension
-            if len(start_positions.size()) > 1:
+            if len(start_positions.shape) > 1:
                 start_positions = start_positions.squeeze(-1)
-            if len(end_positions.size()) > 1:
+            if len(end_positions.shape) > 1:
                 end_positions = end_positions.squeeze(-1)
-            # sometimes the start/end positions are outside our model inputs,
-            # we ignore these terms
-            ignored_index = start_logits.size(1)
-            start_positions = start_positions.clamp(0, ignored_index)
-            end_positions = end_positions.clamp(0, ignored_index)
+            ignored_index = start_logits.shape[1]
+            start_positions = mx.clip(start_positions, 0, ignored_index)
+            end_positions = mx.clip(end_positions, 0, ignored_index)
 
             loss_fct = nn.losses.cross_entropy
-            start_loss = loss_fct(start_logits, start_positions)
-            end_loss = loss_fct(end_logits, end_positions)
+            start_loss = mx.mean(loss_fct(start_logits, start_positions))
+            end_loss = mx.mean(loss_fct(end_logits, end_positions))
             total_loss = (start_loss + end_loss) / 2
 
         if not return_dict:

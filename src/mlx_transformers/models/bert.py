@@ -540,8 +540,11 @@ class BertForMaskedLM(nn.Module, MlxPretrainedMixin):
         masked_lm_loss = None
         if labels is not None:
             loss_fct = nn.losses.cross_entropy  # -100 index = padding token
-            masked_lm_loss = loss_fct(
-                prediction_scores.view(-1, self.config.vocab_size), labels.view(-1)
+            masked_lm_loss = mx.mean(
+                loss_fct(
+                    prediction_scores.reshape(-1, self.config.vocab_size),
+                    labels.reshape(-1),
+                )
             )
 
         if not return_dict:
@@ -619,7 +622,17 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
                 elif self.num_labels > 1 and (
-                    labels.dtype == mx.long or labels.dtype == mx.int
+                    labels.dtype
+                    in (
+                        mx.int8,
+                        mx.int16,
+                        mx.int32,
+                        mx.int64,
+                        mx.uint8,
+                        mx.uint16,
+                        mx.uint32,
+                        mx.uint64,
+                    )
                 ):
                     self.config.problem_type = "single_label_classification"
                 else:
@@ -627,12 +640,17 @@ class BertForSequenceClassification(nn.Module, MlxPretrainedMixin):
 
             if self.config.problem_type == "regression":
                 if self.num_labels == 1:
-                    loss = nn.losses.mse_loss(logits.squeeze(), labels.squeeze())
+                    loss = mx.mean(
+                        nn.losses.mse_loss(logits.squeeze(), labels.squeeze())
+                    )
                 else:
-                    loss = nn.losses.mse_loss(logits, labels)
+                    loss = mx.mean(nn.losses.mse_loss(logits, labels))
             elif self.config.problem_type == "single_label_classification":
-                loss = nn.losses.cross_entropy(
-                    logits.view(-1, self.num_labels), labels.view(-1)
+                loss = mx.mean(
+                    nn.losses.cross_entropy(
+                        logits.reshape(-1, self.num_labels),
+                        labels.reshape(-1),
+                    )
                 )
             elif self.config.problem_type == "multi_label_classification":
                 max_val = mx.maximum(logits, 0.0)
@@ -707,7 +725,9 @@ class BertForTokenClassification(nn.Module, MlxPretrainedMixin):
         loss = None
         if labels is not None:
             loss_fct = nn.losses.cross_entropy
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            loss = mx.mean(
+                loss_fct(logits.reshape(-1, self.num_labels), labels.reshape(-1))
+            )
 
         if not return_dict:
             output = (logits,) + outputs[2:]
@@ -787,8 +807,8 @@ class BertForQuestionAnswering(nn.Module, MlxPretrainedMixin):
             end_positions = mx.clip(end_positions, 0, ignored_index)
 
             loss_fct = nn.losses.cross_entropy
-            start_loss = loss_fct(start_logits, start_positions)
-            end_loss = loss_fct(end_logits, end_positions)
+            start_loss = mx.mean(loss_fct(start_logits, start_positions))
+            end_loss = mx.mean(loss_fct(end_logits, end_positions))
             total_loss = (start_loss + end_loss) / 2
 
         if not return_dict:
