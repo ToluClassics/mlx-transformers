@@ -449,13 +449,13 @@ def main():
     parser.add_argument(
         "--samples-per-bucket",
         type=int,
-        default=3,
+        default=10,
         help="How many prompts to sample from each dataset bucket.",
     )
     parser.add_argument(
         "--dataset-max-samples",
         type=int,
-        default=5000,
+        default=100,
         help="Maximum dataset rows to scan while filling prompt buckets.",
     )
     parser.add_argument(

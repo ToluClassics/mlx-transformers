@@ -39,6 +39,29 @@ inputs = {k: mx.array(v) for k, v in inputs.items()}
 outputs = model(**inputs)
 ```
 
+Minimal training loop:
+
+```python
+from mlx_transformers import Trainer, TrainingArguments
+
+train_dataset = [
+    {"input_ids": [101, 7592, 102], "attention_mask": [1, 1, 1], "labels": 1},
+    {"input_ids": [101, 2088, 102], "attention_mask": [1, 1, 1], "labels": 0},
+]
+
+trainer = Trainer(
+    model=model,
+    args=TrainingArguments(
+        output_dir="checkpoints",
+        per_device_train_batch_size=2,
+        num_train_epochs=1,
+        logging_steps=1,
+    ),
+    train_dataset=train_dataset,
+)
+trainer.train()
+```
+
 Quantized loading:
 
 ```python
