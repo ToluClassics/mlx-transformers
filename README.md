@@ -10,15 +10,21 @@ MLX implementations of Hugging Face-style models for Apple Silicon.
 pip install mlx-transformers
 ```
 
+Install only the optional features you use:
+
+```bash
+pip install "mlx-transformers[tokenizers]"
+pip install "mlx-transformers[vision]"
+pip install "mlx-transformers[chat]"
+```
+
 For local development:
 
 ```bash
 python3.12 -m venv venv
 source venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r requirements.txt
-pip install -e .
-python -m pip install "ruff==0.3.0" build twine pre-commit
+pip install -e ".[test,examples,chat]"
 ```
 
 MLX requires Apple silicon and macOS. Verify that the environment can execute
@@ -104,21 +110,16 @@ and PyTorch `.bin`-only checkpoints instead of leaving model parameters
 silently initialized. `trust_remote_code` is not used: MLX Transformers never
 executes code from a model repository.
 
-## Supported Models
+## Model Support
 
-- BERT
-- RoBERTa
-- XLM-RoBERTa
-- LLaMA
-- Phi
-- Phi-3
-- Qwen3
-- Qwen3-VL
-- OpenELM
-- Persimmon
-- Fuyu
-- Gemma3
-- M2M100 / NLLB
+Real-checkpoint verification currently covers BERT, Llama, Phi-3, Qwen3,
+Gemma 3, and M2M100/NLLB paths. Phi, Qwen3-VL, RoBERTa, XLM-RoBERTa, OpenELM,
+Persimmon, and Fuyu remain experimental because at least one important
+real-checkpoint path is still unverified.
+
+See [SUPPORT.md](SUPPORT.md) for exact checkpoints/tasks, compatibility bounds,
+dtype limitations, generation semantics, and the verified/experimental
+promotion policy.
 
 ## Examples
 

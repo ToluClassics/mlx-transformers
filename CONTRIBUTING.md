@@ -28,7 +28,7 @@ removed.
 Install the same quality tools used by CI and run all checks:
 
 ```bash
-python -m pip install "ruff==0.3.0" build twine pre-commit
+python -m pip install -e ".[test]"
 ruff check .
 ruff format --check .
 python -m build
@@ -44,6 +44,18 @@ pre-commit run --all-files
 ```
 
 The hooks run Ruff lint and formatting checks.
+
+Dependency metadata is canonical in `pyproject.toml`. Keep core imports in the
+main dependency set and place tokenizer, vision, example, chat, and test-only
+packages in the matching optional extra. `requirements.txt` is only a
+convenience entry point for installing the complete development environment.
+
+## Support claims
+
+Read [SUPPORT.md](SUPPORT.md) before changing advertised compatibility.
+Promoting an experimental family or task requires a bounded real-checkpoint
+test, an exact environment/revision record, and numerical or behavioral
+acceptance criteria on Apple silicon.
 
 ## Hub integration tests
 

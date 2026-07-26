@@ -15,14 +15,14 @@ class FuyuForCausalLM(nn.Module, MlxPretrainedMixin):
     def __init__(self, config: FuyuConfig):
         super().__init__()
         self.config = config
-        self.padding_idx = config.pad_token_id
-        self.vocab_size = config.vocab_size
+        self.padding_idx = config.text_config.pad_token_id
+        self.vocab_size = config.text_config.vocab_size
 
         self.language_model = PersimmonForCausalLM(config.text_config)
 
         self.vision_embed_tokens = nn.Linear(
             config.patch_size * config.patch_size * config.num_channels,
-            config.hidden_size,
+            config.text_config.hidden_size,
         )
 
     def get_input_embeddings(self):

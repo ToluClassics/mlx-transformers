@@ -114,7 +114,7 @@ class TestAdditionalCausalFamilies(unittest.TestCase):
             bos_token_id=1,
             eos_token_id=2,
             image_token_id=10,
-            text_config=text_config,
+            text_config=text_config.to_dict(),
         )
         model = FuyuForCausalLM(config)
         model.eval()
@@ -216,6 +216,8 @@ class TestRobertaFamilies(unittest.TestCase):
             attention_mask=attention_mask,
         )
         qa_config_dict = config.to_dict()
+        qa_config_dict.pop("id2label", None)
+        qa_config_dict.pop("label2id", None)
         qa_config_dict["num_labels"] = 2
         qa_config = config_class(**qa_config_dict)
         qa_output = question_answering_class(qa_config)(

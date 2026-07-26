@@ -169,6 +169,7 @@ class TestMlxLlamaLocalBehavior(unittest.TestCase):
                 {"input_ids": input_ids, "attention_mask": attention_mask},
                 max_length=3,
                 temp=0.0,
+                eos_token_id=[],
             )
         )
 
