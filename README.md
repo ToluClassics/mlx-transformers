@@ -56,17 +56,73 @@ inputs = {k: mx.array(v) for k, v in inputs.items()}
 outputs = model(**inputs)
 ```
 
-Quantized loading:
+## Quantized Inference
+
+MLX Transformers can auto-detect an MLX pre-quantized checkpoint and run it
+without extra loader flags:
 
 ```python
-model.from_pretrained(
+from mlx_transformers import generate_text, load_causal_model
+
+loaded = load_causal_model(
+    "mlx-community/Phi-3-mini-4k-instruct-4bit",
+)
+result = generate_text(
+    loaded.model,
+    loaded.tokenizer,
+    "Explain weight quantization in one sentence.",
+    max_new_tokens=64,
+)
+print(loaded.quantization)
+print(result.text)
+```
+
+To quantize a regular safetensors checkpoint in memory after loading:
+
+```python
+import mlx.core as mx
+
+from mlx_transformers import QuantizationConfig, load_causal_model
+
+loaded = load_causal_model(
     model_name,
-    quantize=True,
-    group_size=64,
-    bits=4,
-    mode="affine",
+    dtype=mx.float16,
+    quantization=QuantizationConfig(
+        group_size=64,
+        bits=4,
+        mode="affine",
+    ),
 )
 ```
+
+The existing model-specific loader flags remain supported:
+
+```python
+model.from_pretrained(model_name, quantize=True, group_size=64, bits=4)
+```
+
+The installed CLI offers the same two paths:
+
+```bash
+# Auto-detect a pre-quantized MLX checkpoint.
+mlx-transformers-generate \
+  --model mlx-community/Phi-3-mini-4k-instruct-4bit \
+  --prompt "Explain attention masking." \
+  --max-new-tokens 64
+
+# Quantize a regular checkpoint after loading it.
+mlx-transformers-generate \
+  --model meta-llama/Llama-3.2-1B-Instruct \
+  --prompt "Explain attention masking." \
+  --quantize --group-size 64 --bits 4 \
+  --max-new-tokens 64
+```
+
+On-load quantization temporarily materializes the regular checkpoint before
+replacing supported layers, so peak memory is higher than loading an already
+quantized checkpoint. Prefer a reviewed pre-quantized MLX checkpoint for large
+models. See [docs/load_model.md](docs/load_model.md) for supported modes,
+offline use, metadata inspection, and safety constraints.
 
 Generation is finite and uses Hugging Face-style `max_new_tokens`:
 
@@ -184,5 +240,5 @@ Tests that use external checkpoints are skipped unless
 download sizes before opting in. Some checkpoints are gated; set `HF_TOKEN`
 only for an explicitly reviewed integration run.
 
-The verified 2026-07-26 Apple-silicon baseline is 98 discovered tests:
-76 pass and 22 Hub integration tests skip.
+The verified 2026-07-26 Apple-silicon baseline is 114 discovered tests:
+92 pass and 22 Hub integration tests skip.

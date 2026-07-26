@@ -21,7 +21,7 @@ HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
   python -m unittest discover -s tests -v
 ```
 
-The expected baseline is 98 discovered tests: 76 pass and 22 Hub tests skip.
+The expected baseline is 114 discovered tests: 92 pass and 22 Hub tests skip.
 The exact count should change only when tests are intentionally added or
 removed.
 

@@ -17,6 +17,8 @@ import mlx.core as mx
 import mlx.nn as nn
 from mlx.utils import tree_unflatten, tree_flatten
 
+from ..quantization import QuantizationConfig, QuantizationInfo
+
 logger = logging.getLogger(__name__)
 
 QuantizationPredicate = Optional[Callable[[str, Any], Union[bool, Dict[str, Any]]]]
@@ -390,6 +392,7 @@ class MlxPretrainedMixin:
     def _quantize_model_for_checkpoint(
         model: "MlxPretrainedMixin",
         checkpoint_quantization: Dict[str, Any],
+        quantization_config: QuantizationConfig,
         tensor_keys: Set[str],
     ) -> None:
         def class_predicate(path: str, module: Any):
@@ -401,9 +404,10 @@ class MlxPretrainedMixin:
 
         nn.quantize(
             model,
-            group_size=checkpoint_quantization["group_size"],
-            bits=checkpoint_quantization["bits"],
-            mode=checkpoint_quantization.get("mode", "affine"),
+            group_size=quantization_config.group_size,
+            bits=quantization_config.bits,
+            mode=quantization_config.mode,
+            quantize_input=quantization_config.quantize_input,
             class_predicate=class_predicate,
         )
 
@@ -431,6 +435,7 @@ class MlxPretrainedMixin:
         mode: str = "affine",
         quantize_input: bool = False,
         class_predicate: QuantizationPredicate = None,
+        quantization: Optional[QuantizationConfig] = None,
     ) -> "MlxPretrainedMixin":
         """
         Load a pretrained model from HuggingFace Hub or local path.
@@ -451,6 +456,8 @@ class MlxPretrainedMixin:
             mode: Quantization mode passed to ``mlx.nn.quantize``
             quantize_input: Whether to quantize supported layer inputs
             class_predicate: Optional predicate selecting which modules to quantize
+            quantization: Validated quantization settings. Do not combine this
+                with the legacy quantize/group_size/bits/mode arguments.
 
         Returns:
             Self with loaded model weights
@@ -473,19 +480,36 @@ class MlxPretrainedMixin:
                 "dtype must be one of mx.float16, mx.bfloat16, or mx.float32."
             )
 
-        should_quantize = (
+        legacy_quantization_requested = (
             quantize
             or group_size is not None
             or bits is not None
             or mode != "affine"
             or quantize_input
+        )
+        if quantization is not None and not isinstance(
+            quantization, QuantizationConfig
+        ):
+            raise TypeError("quantization must be a QuantizationConfig instance.")
+        if quantization is not None and legacy_quantization_requested:
+            raise ValueError(
+                "Pass either quantization=QuantizationConfig(...) or the legacy "
+                "quantize/group_size/bits/mode arguments, not both."
+            )
+        runtime_quantization = quantization
+        should_quantize = (
+            runtime_quantization is not None
+            or legacy_quantization_requested
             or class_predicate is not None
         )
-        if should_quantize and quantize_input and mode not in {"nvfp4", "mxfp8"}:
-            raise ValueError(
-                "quantize_input=True is only supported for mode='nvfp4' or "
-                "mode='mxfp8'."
+        if should_quantize and runtime_quantization is None:
+            runtime_quantization = QuantizationConfig(
+                group_size=group_size,
+                bits=bits,
+                mode=mode,
+                quantize_input=quantize_input,
             )
+        self.quantization_info = None
 
         logger.info(
             f"Loading model from '{model_name_or_path}' "
@@ -525,6 +549,7 @@ class MlxPretrainedMixin:
         prequantized_checkpoint = self._is_prequantized_checkpoint(
             tensors, checkpoint_quantization
         )
+        checkpoint_quantization_config = None
         if prequantized_checkpoint:
             if should_quantize:
                 raise ValueError(
@@ -532,10 +557,14 @@ class MlxPretrainedMixin:
                     "Load it without quantize/group_size/bits/mode arguments."
                 )
 
+            checkpoint_quantization_config = QuantizationConfig.from_mapping(
+                checkpoint_quantization
+            )
             setattr(self.config, "quantization", checkpoint_quantization)
             self._quantize_model_for_checkpoint(
                 self,
                 checkpoint_quantization,
+                checkpoint_quantization_config,
                 set(tensors),
             )
         else:
@@ -627,7 +656,7 @@ class MlxPretrainedMixin:
 
         self._apply_pretrained_tensors(tensors)
         if should_quantize and not prequantized_checkpoint:
-            if quantize_input and class_predicate is None:
+            if runtime_quantization.quantize_input and class_predicate is None:
                 linear_cls = nn.Linear
 
                 def linear_only_predicate(_, module, linear_cls=linear_cls):
@@ -642,18 +671,28 @@ class MlxPretrainedMixin:
             logger.info(
                 "Applying MLX quantization "
                 "(group_size=%s, bits=%s, mode=%s, quantize_input=%s)",
-                group_size,
-                bits,
-                mode,
-                quantize_input,
+                runtime_quantization.group_size,
+                runtime_quantization.bits,
+                runtime_quantization.mode,
+                runtime_quantization.quantize_input,
             )
             nn.quantize(
                 self,
-                group_size=group_size,
-                bits=bits,
-                mode=mode,
-                quantize_input=quantize_input,
+                group_size=runtime_quantization.group_size,
+                bits=runtime_quantization.bits,
+                mode=runtime_quantization.mode,
+                quantize_input=runtime_quantization.quantize_input,
                 class_predicate=class_predicate,
+            )
+            setattr(self.config, "quantization", runtime_quantization.as_dict())
+            self.quantization_info = QuantizationInfo.from_config(
+                runtime_quantization,
+                source="runtime",
+            )
+        elif prequantized_checkpoint:
+            self.quantization_info = QuantizationInfo.from_config(
+                checkpoint_quantization_config,
+                source="checkpoint",
             )
         self.eval()
         return self
