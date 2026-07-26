@@ -240,5 +240,5 @@ Tests that use external checkpoints are skipped unless
 download sizes before opting in. Some checkpoints are gated; set `HF_TOKEN`
 only for an explicitly reviewed integration run.
 
-The verified 2026-07-26 Apple-silicon baseline is 113 discovered tests:
-91 pass and 22 Hub integration tests skip.
+The verified 2026-07-26 Apple-silicon baseline is 114 discovered tests:
+92 pass and 22 Hub integration tests skip.
