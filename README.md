@@ -119,7 +119,9 @@ real-checkpoint path is still unverified.
 
 See [SUPPORT.md](SUPPORT.md) for exact checkpoints/tasks, compatibility bounds,
 dtype limitations, generation semantics, and the verified/experimental
-promotion policy.
+promotion policy. OpenELM, Persimmon, and Fuyu are maintenance-only: existing
+behavior retains bounded regression coverage, but new compatibility and
+feature work prioritizes the active model families.
 
 ## Examples
 

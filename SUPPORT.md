@@ -19,6 +19,24 @@ it is not a drop-in replacement for `transformers`, does not register with
 Verification applies only to the listed tasks and configurations. It does not
 imply that every checkpoint using the same architecture is compatible.
 
+## Lifecycle priority
+
+Support status and maintenance priority are separate:
+
+- **Active** families receive compatibility, correctness, and evidence work:
+  BERT, RoBERTa, XLM-RoBERTa, Llama, Phi/Phi-3, Qwen3, Qwen3-VL, Gemma 3, and
+  M2M100/NLLB.
+- **Maintenance-only** families remain importable for existing users but do
+  not receive proactive feature-parity or performance work: OpenELM,
+  Persimmon, and Fuyu.
+
+Maintenance-only families retain bounded regression coverage so unrelated
+changes do not silently break them. If keeping one compatible begins to impose
+disproportionate cost or blocks the active support matrix, it may be deprecated
+in release notes and removed from public exports in a subsequent release.
+Security and fail-closed loading fixes still apply while a family remains
+exported.
+
 ## Compatibility baseline
 
 | Layer | Verified baseline |
