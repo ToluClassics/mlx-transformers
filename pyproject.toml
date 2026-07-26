@@ -34,6 +34,9 @@ dependencies = [
   "transformers>=4.57.6,<6",
 ]
 
+[project.scripts]
+mlx-transformers-generate = "mlx_transformers.cli:main"
+
 [project.optional-dependencies]
 tokenizers = [
   "sentencepiece>=0.2.0",

@@ -75,9 +75,19 @@ Gemma 3 4B multimodal inference produced non-finite values in float16 during
 validation. Use float32 or `mx.bfloat16` for that path. Float16 is not a
 verified Gemma 3 4B multimodal configuration.
 
-Quantization structure and error paths have bounded tests. Real quantized
-generation is currently verified only for the tested 4-bit Phi-3 checkpoint
-with group size 64.
+Quantized inference is verified through two bounded paths:
+
+- a regular synthetic Llama checkpoint loaded and quantized at runtime with
+  affine 4-bit weights and group size 32;
+- saved/reloaded pre-quantized synthetic Llama weights plus the cached
+  `mlx-community/Phi-3-mini-4k-instruct-4bit` checkpoint with affine 4-bit
+  weights and group size 64.
+
+Both paths pass finite forward execution and bounded cached generation. The
+public CLI was run offline against the cached Phi-3 checkpoint on Apple
+silicon. Affine, MXFP4, MXFP8, and NVFP4 settings are validated against the
+MLX 0.31/0.32 contract, but real-checkpoint evidence is currently limited to
+affine 4-bit weights.
 
 ## Generation contract
 
@@ -102,7 +112,14 @@ Transformers stopping-criteria API are not implemented.
 `from_pretrained` supports local checkpoint directories and Hugging Face Hub
 model IDs. It validates safetensors shards and indexes, rejects missing or
 unexpected model parameters, and supports explicit offline, cache, revision,
-token, worker, and dtype controls.
+token, worker, dtype, and quantization controls. Pre-quantized MLX checkpoints
+are detected from checkpoint metadata and scale tensors. Regular checkpoints
+can be quantized after loading through `QuantizationConfig` or the compatible
+legacy flags.
+
+Runtime quantization has a higher peak-memory requirement because the regular
+checkpoint is materialized before its supported modules are replaced. It does
+not convert and publish a reusable checkpoint.
 
 PyTorch `.bin` checkpoints and remote model code are unsupported.
 `trust_remote_code=True` is ignored with a warning rather than executing code

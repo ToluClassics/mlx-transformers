@@ -10,6 +10,7 @@ from huggingface_hub.errors import LocalEntryNotFoundError
 import mlx.core as mx
 
 from src.mlx_transformers.models.base import MlxPretrainedMixin
+from src.mlx_transformers.quantization import QuantizationConfig
 
 
 class DummyTensor:
@@ -85,6 +86,9 @@ class TestFromPretrainedQuantization(unittest.TestCase):
         self.assertEqual(model.loaded_weights, ({"layer.weight": tensor}, True))
         self.assertIsNone(model.updated_weights)
         self.assertTrue(model.eval_called)
+        self.assertEqual(model.quantization_info.source, "runtime")
+        self.assertEqual(model.quantization_info.group_size, 64)
+        self.assertEqual(model.config.quantization["bits"], 4)
         mock_quantize.assert_called_once_with(
             model,
             group_size=64,
@@ -196,9 +200,12 @@ class TestFromPretrainedQuantization(unittest.TestCase):
         self.assertEqual(kwargs["group_size"], 64)
         self.assertEqual(kwargs["bits"], 4)
         self.assertEqual(kwargs["mode"], "affine")
+        self.assertFalse(kwargs["quantize_input"])
         self.assertTrue(predicate("layer", FakeQuantizableModule()))
         self.assertFalse(predicate("other", FakeQuantizableModule()))
         self.assertFalse(predicate("layer", object()))
+        self.assertEqual(model.quantization_info.source, "checkpoint")
+        self.assertEqual(model.quantization_info.group_size, 64)
 
     def test_from_pretrained_rejects_requantizing_prequantized_checkpoint(self):
         model = DummyModel()
@@ -223,6 +230,44 @@ class TestFromPretrainedQuantization(unittest.TestCase):
                     "Checkpoint already contains MLX quantized weights",
                 ):
                     model.from_pretrained(tmpdir, quantize=True, bits=4)
+
+    def test_from_pretrained_accepts_typed_quantization_config(self):
+        tensor = DummyTensor()
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={"layer.weight": tensor},
+            ), patch(
+                "src.mlx_transformers.models.base.nn.quantize",
+            ) as mock_quantize:
+                model.from_pretrained(
+                    tmpdir,
+                    quantization=QuantizationConfig(group_size=32, bits=3),
+                )
+
+        mock_quantize.assert_called_once_with(
+            model,
+            group_size=32,
+            bits=3,
+            mode="affine",
+            quantize_input=False,
+            class_predicate=None,
+        )
+        self.assertEqual(model.quantization_info.source, "runtime")
+        self.assertEqual(model.config.quantization["group_size"], 32)
+
+    def test_from_pretrained_rejects_mixed_quantization_apis(self):
+        model = DummyModel()
+
+        with self.assertRaisesRegex(ValueError, "either quantization="):
+            model.from_pretrained(
+                "unused",
+                quantize=True,
+                quantization=QuantizationConfig(),
+            )
 
 
 class TestFromPretrainedLoadingContract(unittest.TestCase):
