@@ -38,9 +38,7 @@ class QuantizationConfig:
             )
 
         default_group_size, default_bits = _MODE_DEFAULTS[normalized_mode]
-        group_size = (
-            default_group_size if self.group_size is None else self.group_size
-        )
+        group_size = default_group_size if self.group_size is None else self.group_size
         bits = default_bits if self.bits is None else self.bits
 
         if not isinstance(group_size, int) or isinstance(group_size, bool):

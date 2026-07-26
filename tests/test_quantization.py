@@ -25,18 +25,24 @@ class TestQuantizationConfig(unittest.TestCase):
 
     def test_specialized_modes_normalize_their_defaults(self):
         self.assertEqual(
-            (QuantizationConfig(mode="mxfp4").group_size,
-             QuantizationConfig(mode="mxfp4").bits),
+            (
+                QuantizationConfig(mode="mxfp4").group_size,
+                QuantizationConfig(mode="mxfp4").bits,
+            ),
             (32, 4),
         )
         self.assertEqual(
-            (QuantizationConfig(mode="mxfp8").group_size,
-             QuantizationConfig(mode="mxfp8").bits),
+            (
+                QuantizationConfig(mode="mxfp8").group_size,
+                QuantizationConfig(mode="mxfp8").bits,
+            ),
             (32, 8),
         )
         self.assertEqual(
-            (QuantizationConfig(mode="nvfp4").group_size,
-             QuantizationConfig(mode="nvfp4").bits),
+            (
+                QuantizationConfig(mode="nvfp4").group_size,
+                QuantizationConfig(mode="nvfp4").bits,
+            ),
             (16, 4),
         )
 
@@ -61,9 +67,7 @@ class TestQuantizationConfig(unittest.TestCase):
         )
 
     def test_checkpoint_mapping_and_info_are_normalized(self):
-        config = QuantizationConfig.from_mapping(
-            {"group_size": 32, "bits": 4}
-        )
+        config = QuantizationConfig.from_mapping({"group_size": 32, "bits": 4})
         info = QuantizationInfo.from_config(config, source="checkpoint")
 
         self.assertEqual(info.source, "checkpoint")
