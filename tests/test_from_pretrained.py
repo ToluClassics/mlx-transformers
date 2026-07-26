@@ -5,6 +5,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from huggingface_hub.errors import LocalEntryNotFoundError
+
+import mlx.core as mx
+
 from src.mlx_transformers.models.base import MlxPretrainedMixin
 
 
@@ -78,7 +82,7 @@ class TestFromPretrainedQuantization(unittest.TestCase):
                 )
 
         self.assertIs(result, model)
-        self.assertEqual(model.loaded_weights, ({"layer.weight": tensor}, False))
+        self.assertEqual(model.loaded_weights, ({"layer.weight": tensor}, True))
         self.assertIsNone(model.updated_weights)
         self.assertTrue(model.eval_called)
         mock_quantize.assert_called_once_with(
@@ -180,7 +184,7 @@ class TestFromPretrainedQuantization(unittest.TestCase):
         self.assertEqual(model.loaded_weights[0]["layer.weight"], quantized_weight)
         self.assertEqual(model.loaded_weights[0]["layer.scales"], quantized_scales)
         self.assertEqual(model.loaded_weights[0]["layer.biases"], quantized_biases)
-        self.assertFalse(model.loaded_weights[1])
+        self.assertTrue(model.loaded_weights[1])
         self.assertEqual(model.config.quantization, {"group_size": 64, "bits": 4})
         self.assertIsNone(quantized_weight.dtype)
         self.assertIsNone(quantized_scales.dtype)
@@ -219,3 +223,219 @@ class TestFromPretrainedQuantization(unittest.TestCase):
                     "Checkpoint already contains MLX quantized weights",
                 ):
                     model.from_pretrained(tmpdir, quantize=True, bits=4)
+
+
+class TestFromPretrainedLoadingContract(unittest.TestCase):
+    def test_from_pretrained_accepts_explicit_bfloat16_dtype(self):
+        model = DummyModel()
+        tensor = DummyTensor()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={"layer.weight": tensor},
+            ):
+                model.from_pretrained(tmpdir, dtype=mx.bfloat16)
+
+        self.assertEqual(tensor.dtype, mx.bfloat16)
+
+    def test_from_pretrained_rejects_conflicting_dtype_arguments(self):
+        model = DummyModel()
+
+        with self.assertRaisesRegex(ValueError, "only one of float16"):
+            model.from_pretrained(
+                "unused",
+                float16=True,
+                dtype=mx.bfloat16,
+            )
+
+    def test_from_pretrained_rejects_missing_required_tensors(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={},
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "missing required model tensor key.*layer.weight",
+                ):
+                    model.from_pretrained(tmpdir)
+
+        self.assertIsNone(model.loaded_weights)
+        self.assertFalse(model.eval_called)
+
+    def test_from_pretrained_rejects_unexpected_tensors(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={
+                    "layer.weight": DummyTensor(),
+                    "other.weight": DummyTensor(),
+                },
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "do not map to this model.*other.weight",
+                ):
+                    model.from_pretrained(tmpdir)
+
+    def test_from_pretrained_ignores_known_transformers_buffers(self):
+        model = DummyModel()
+        tensor = DummyTensor()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={
+                    "layer.weight": tensor,
+                    "embeddings.position_ids": DummyTensor(),
+                    "bert.pooler.dense.bias": DummyTensor(),
+                    "bert.pooler.dense.weight": DummyTensor(),
+                },
+            ):
+                model.from_pretrained(tmpdir)
+
+        self.assertEqual(model.loaded_weights, ({"layer.weight": tensor}, True))
+
+    def test_from_pretrained_keeps_parameters_derived_from_config(self):
+        model = DummyModel()
+        tensor = DummyTensor()
+        derived_tensor = object()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={"layer.weight": tensor},
+            ), patch(
+                "src.mlx_transformers.models.base.tree_flatten",
+                return_value=[
+                    ("layer.weight", object()),
+                    ("layer.rotary_emb.inv_freq", derived_tensor),
+                ],
+            ):
+                model.from_pretrained(tmpdir)
+
+        self.assertEqual(
+            model.loaded_weights,
+            (
+                {
+                    "layer.weight": tensor,
+                    "layer.rotary_emb.inv_freq": derived_tensor,
+                },
+                True,
+            ),
+        )
+
+    def test_from_pretrained_rejects_duplicate_shard_keys(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model-00001-of-00002.safetensors").touch()
+            Path(tmpdir, "model-00002-of-00002.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                side_effect=[
+                    {"layer.weight": DummyTensor()},
+                    {"layer.weight": DummyTensor()},
+                ],
+            ):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "Duplicate tensor key.*layer.weight",
+                ):
+                    model.from_pretrained(tmpdir)
+
+    def test_from_pretrained_uses_safetensors_index_shards(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shard = Path(tmpdir, "model-00001-of-00001.safetensors")
+            shard.touch()
+            Path(tmpdir, "unreferenced.safetensors").touch()
+            Path(tmpdir, "model.safetensors.index.json").write_text(
+                json.dumps({"weight_map": {"layer.weight": shard.name}}),
+                encoding="utf-8",
+            )
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={"layer.weight": DummyTensor()},
+            ) as mock_load:
+                model.from_pretrained(tmpdir)
+
+        mock_load.assert_called_once_with(str(shard))
+
+    def test_from_pretrained_rejects_bin_only_checkpoint(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "pytorch_model.bin").touch()
+            with self.assertRaisesRegex(ValueError, "supports safetensors only"):
+                model.from_pretrained(tmpdir)
+
+    def test_from_pretrained_forwards_hub_resolution_controls(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.snapshot_download",
+                return_value=tmpdir,
+            ) as mock_snapshot, patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={"layer.weight": DummyTensor()},
+            ):
+                model.from_pretrained(
+                    "org/model",
+                    cache_dir="/tmp/test-cache",
+                    revision="revision-sha",
+                    local_files_only=True,
+                    token="test-token",
+                    max_workers=2,
+                )
+
+        mock_snapshot.assert_called_once_with(
+            repo_id="org/model",
+            allow_patterns=MlxPretrainedMixin._CHECKPOINT_PATTERNS,
+            cache_dir="/tmp/test-cache",
+            local_files_only=True,
+            max_workers=2,
+            revision="revision-sha",
+            token="test-token",
+        )
+
+    def test_from_pretrained_reports_offline_cache_miss(self):
+        model = DummyModel()
+
+        with patch(
+            "src.mlx_transformers.models.base.snapshot_download",
+            side_effect=LocalEntryNotFoundError("not cached"),
+        ):
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                "No cached snapshot.*Disable local_files_only",
+            ):
+                model.from_pretrained("org/model", local_files_only=True)
+
+    def test_from_pretrained_warns_that_remote_code_is_not_executed(self):
+        model = DummyModel()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            Path(tmpdir, "model.safetensors").touch()
+            with patch(
+                "src.mlx_transformers.models.base.mx.load",
+                return_value={"layer.weight": DummyTensor()},
+            ), patch(
+                "src.mlx_transformers.models.base.warnings.warn",
+            ) as mock_warn:
+                model.from_pretrained(tmpdir, trust_remote_code=True)
+
+        self.assertIn("trust_remote_code has no effect", mock_warn.call_args.args[0])

@@ -579,6 +579,11 @@ class M2M100Model(nn.Module):
 
 
 class M2M100ForConditionalGeneration(nn.Module, MlxPretrainedMixin):
+    _DERIVED_MODEL_PARAMETER_SUFFIXES = (
+        *MlxPretrainedMixin._DERIVED_MODEL_PARAMETER_SUFFIXES,
+        "embed_positions.weight",
+    )
+
     def __init__(self, config: M2M100Config):
         super().__init__()
 

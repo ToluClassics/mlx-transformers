@@ -83,6 +83,32 @@ class TestMlxQwen3VLLocalBehavior(unittest.TestCase):
 
         self.assertEqual(outputs.logits.shape, (1, 4, 64))
 
+    def test_multimodal_generation_is_finite_and_preserves_inputs(self):
+        model = MlxQwen3VLForConditionalGeneration(self._tiny_config())
+        model.eval()
+        inputs = {
+            "input_ids": mx.array([[1, 10, 10, 2]], dtype=mx.int32),
+            "attention_mask": mx.ones((1, 4), dtype=mx.int32),
+            "mm_token_type_ids": mx.array([[0, 1, 1, 0]], dtype=mx.int32),
+            "pixel_values": mx.zeros((2, 12), dtype=mx.float32),
+            "image_grid_thw": mx.array([[1, 1, 2]], dtype=mx.int32),
+        }
+
+        tokens = list(
+            model.generate(
+                inputs,
+                max_new_tokens=2,
+                temp=0.0,
+                eos_token_id=[],
+            )
+        )
+
+        self.assertEqual(len(tokens), 2)
+        self.assertTrue(all(token.shape == (1,) for token in tokens))
+        self.assertEqual(inputs["input_ids"].shape, (1, 4))
+        self.assertEqual(inputs["attention_mask"].shape, (1, 4))
+        self.assertEqual(inputs["mm_token_type_ids"].shape, (1, 4))
+
     def test_compute_3d_position_ids_requires_mm_token_type_ids(self):
         config = self._tiny_config()
         model = Qwen3VLModel(config)

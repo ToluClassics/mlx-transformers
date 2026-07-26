@@ -2,17 +2,21 @@ import unittest
 
 import mlx.core as mx
 import numpy as np
-from transformers import AutoTokenizer, PhiConfig, PhiForCausalLM
+from transformers import AutoTokenizer, PhiConfig
 
 from src.mlx_transformers.models import PhiModel as MlxPhiModel
 from src.mlx_transformers.models import PhiForCausalLM as MlxPhiForCausalLM
+from tests.utils import requires_hub
 
 
-def load_hgf_model(model_name: str) -> PhiForCausalLM:
+def load_hgf_model(model_name: str):
+    from transformers import PhiForCausalLM
+
     model = PhiForCausalLM.from_pretrained(model_name)
     return model
 
 
+@requires_hub
 class TestMlxPhi(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -110,3 +114,23 @@ class TestMlxPhiLocalBehavior(unittest.TestCase):
         )
 
         self.assertEqual(len(tokens), 3)
+
+    def test_generate_supports_batches(self):
+        model = MlxPhiForCausalLM(self._tiny_config())
+        model.eval()
+        inputs = {
+            "input_ids": mx.array([[1, 2, 3], [0, 4, 5]], dtype=mx.int32),
+            "attention_mask": mx.array([[1, 1, 1], [0, 1, 1]], dtype=mx.int32),
+        }
+
+        tokens = list(
+            model.generate(
+                inputs,
+                max_new_tokens=2,
+                temp=0.0,
+                eos_token_id=[],
+            )
+        )
+
+        self.assertEqual(len(tokens), 2)
+        self.assertTrue(all(token.shape == (2,) for token in tokens))

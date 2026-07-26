@@ -1,10 +1,17 @@
 import json
-import os
 import logging
+import warnings
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
-from huggingface_hub import snapshot_download, HfFileSystem
+from huggingface_hub import snapshot_download
+from huggingface_hub.errors import (
+    GatedRepoError,
+    HfHubHTTPError,
+    LocalEntryNotFoundError,
+    RepositoryNotFoundError,
+    RevisionNotFoundError,
+)
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -12,13 +19,325 @@ from mlx.utils import tree_unflatten, tree_flatten
 
 logger = logging.getLogger(__name__)
 
-HF_TOKEN = os.getenv("HF_TOKEN", None)
-
 QuantizationPredicate = Optional[Callable[[str, Any], Union[bool, Dict[str, Any]]]]
 
 
 class MlxPretrainedMixin:
     """Mixin class for loading pretrained models in MLX format."""
+
+    _CHECKPOINT_PATTERNS = [
+        "*.safetensors",
+        "**/*.safetensors",
+        "*.safetensors.index.json",
+        "config.json",
+    ]
+    _IGNORED_CHECKPOINT_SUFFIXES = (
+        "embeddings.position_ids",
+        "embeddings.token_type_ids",
+        "pooler.dense.bias",
+        "pooler.dense.weight",
+        "rotary_emb.inv_freq",
+    )
+    _DERIVED_MODEL_PARAMETER_SUFFIXES = (
+        "embeddings.position_ids",
+        "embeddings.token_type_ids",
+        "embed_tokens.embed_scale",
+        "rotary_emb.cos",
+        "rotary_emb.emb",
+        "rotary_emb.inv_freq",
+        "rotary_emb.inv_freq.full_attention",
+        "rotary_emb.inv_freq.sliding_attention",
+        "rotary_emb.original_inv_freq",
+        "rotary_emb.sin",
+        "rotary_pos_emb.inv_freq",
+    )
+
+    def _generate_tokens(
+        self,
+        inputs: Dict[str, Any],
+        *,
+        max_new_tokens: Optional[int] = None,
+        max_length: Optional[int] = None,
+        temp: float = 1.0,
+        use_cache: bool = True,
+        eos_token_id: Optional[Union[int, List[int]]] = None,
+        pad_token_id: Optional[int] = None,
+        persistent_input_keys=(),
+        sequence_input_fill_values=None,
+    ):
+        """Generate a finite stream of next-token arrays for text models."""
+        if max_new_tokens is not None and max_length is not None:
+            raise ValueError("Pass only one of max_new_tokens or max_length.")
+        if max_new_tokens is None:
+            if max_length is None:
+                raise ValueError("max_new_tokens is required.")
+            warnings.warn(
+                "max_length currently means generated-token count and is "
+                "deprecated; use max_new_tokens instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            max_new_tokens = max_length
+        if not isinstance(max_new_tokens, int) or max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be a non-negative integer.")
+        if temp < 0:
+            raise ValueError("temp must be non-negative.")
+        if max_new_tokens == 0:
+            return
+
+        model_inputs = dict(inputs)
+        sequence_input_fill_values = sequence_input_fill_values or {}
+        persistent_inputs = {
+            key: model_inputs.get(key)
+            for key in persistent_input_keys
+            if model_inputs.get(key) is not None
+        }
+        sequence_inputs = {
+            key: mx.array(model_inputs[key])
+            for key in sequence_input_fill_values
+            if model_inputs.get(key) is not None
+        }
+        if "input_ids" not in model_inputs:
+            raise ValueError("generate requires input_ids.")
+
+        input_ids = model_inputs["input_ids"]
+        if input_ids.ndim != 2:
+            raise ValueError("input_ids must have shape [batch, sequence].")
+
+        attention_mask = model_inputs.get("attention_mask")
+        if attention_mask is None:
+            attention_mask = mx.ones_like(input_ids)
+        else:
+            attention_mask = mx.array(attention_mask)
+        if attention_mask.shape != input_ids.shape:
+            raise ValueError("attention_mask must have the same shape as input_ids.")
+
+        if eos_token_id is None:
+            eos_token_id = getattr(self.config, "eos_token_id", None)
+        if eos_token_id is None:
+            eos_token_ids = ()
+        elif isinstance(eos_token_id, int):
+            eos_token_ids = (eos_token_id,)
+        else:
+            eos_token_ids = tuple(eos_token_id)
+
+        if pad_token_id is None:
+            pad_token_id = getattr(self.config, "pad_token_id", None)
+        if pad_token_id is None:
+            pad_token_id = eos_token_ids[0] if eos_token_ids else 0
+
+        def sample(logits):
+            if temp == 0:
+                return mx.argmax(logits, axis=-1)
+            return mx.random.categorical(logits * (1 / temp))
+
+        def last_token_logits(logits, mask):
+            positions = mx.arange(mask.shape[-1], dtype=mx.int32)
+            last_indices = mx.argmax(mask.astype(mx.int32) * positions, axis=-1)
+            return logits[mx.arange(logits.shape[0]), last_indices]
+
+        model_inputs["attention_mask"] = attention_mask
+        model_inputs["use_cache"] = use_cache
+        output = self(**model_inputs)
+        logits = last_token_logits(output.logits, attention_mask)
+        finished = mx.zeros((input_ids.shape[0],), dtype=mx.bool_)
+        full_input_ids = input_ids
+
+        for generated_index in range(max_new_tokens):
+            sampled_token = sample(logits)
+            next_token = mx.where(finished, pad_token_id, sampled_token)
+            yield next_token
+
+            is_eos = mx.zeros_like(finished)
+            for token_id in eos_token_ids:
+                is_eos = mx.logical_or(is_eos, next_token == token_id)
+            new_finished = mx.logical_or(finished, is_eos)
+            if bool(mx.all(new_finished).item()):
+                return
+            if generated_index + 1 == max_new_tokens:
+                return
+
+            full_input_ids = mx.concatenate(
+                [full_input_ids, mx.expand_dims(next_token, axis=-1)],
+                axis=-1,
+            )
+            next_attention = mx.logical_not(finished).astype(attention_mask.dtype)
+            attention_mask = mx.concatenate(
+                [attention_mask, mx.expand_dims(next_attention, axis=-1)],
+                axis=-1,
+            )
+            for key, value in sequence_inputs.items():
+                fill_value = sequence_input_fill_values[key]
+                extension = mx.full(
+                    (value.shape[0], 1),
+                    fill_value,
+                    dtype=value.dtype,
+                )
+                sequence_inputs[key] = mx.concatenate(
+                    [value, extension],
+                    axis=-1,
+                )
+            finished = new_finished
+
+            past_key_values = output.past_key_values if use_cache else None
+            prepare_kwargs = {
+                **persistent_inputs,
+                **sequence_inputs,
+            }
+            if persistent_inputs:
+                prepare_kwargs["is_first_iteration"] = False
+            model_inputs = self.prepare_inputs_for_generation(
+                input_ids=full_input_ids,
+                past_key_values=past_key_values,
+                attention_mask=attention_mask,
+                inputs_embeds=None,
+                use_cache=use_cache,
+                **prepare_kwargs,
+            )
+            output = self(**model_inputs)
+            logits = output.logits[:, -1, :]
+
+    def _normalize_pretrained_tensors(
+        self, tensors: Dict[str, mx.array]
+    ) -> Dict[str, mx.array]:
+        """Map upstream checkpoint names to this model's parameter topology."""
+        return tensors
+
+    @staticmethod
+    def _looks_like_local_path(model_name_or_path: str) -> bool:
+        return Path(model_name_or_path).expanduser().is_absolute() or (
+            model_name_or_path.startswith(("./", "../", "~"))
+        )
+
+    @classmethod
+    def _resolve_checkpoint_path(
+        cls,
+        model_name_or_path: str,
+        *,
+        cache_dir: Optional[str],
+        revision: str,
+        local_files_only: bool,
+        token: Optional[str],
+        max_workers: int,
+    ) -> Path:
+        local_path = Path(model_name_or_path).expanduser()
+        if local_path.is_dir():
+            return local_path
+        if cls._looks_like_local_path(model_name_or_path):
+            raise FileNotFoundError(
+                f"Local model directory does not exist: '{model_name_or_path}'"
+            )
+
+        try:
+            return Path(
+                snapshot_download(
+                    repo_id=model_name_or_path,
+                    allow_patterns=cls._CHECKPOINT_PATTERNS,
+                    cache_dir=cache_dir,
+                    local_files_only=local_files_only,
+                    max_workers=max_workers,
+                    revision=revision,
+                    token=token,
+                )
+            )
+        except GatedRepoError as error:
+            raise PermissionError(
+                f"Model '{model_name_or_path}' is gated or private. "
+                "Pass token=... with access to the repository."
+            ) from error
+        except RevisionNotFoundError as error:
+            raise ValueError(
+                f"Revision '{revision}' was not found for model "
+                f"'{model_name_or_path}'."
+            ) from error
+        except LocalEntryNotFoundError as error:
+            raise FileNotFoundError(
+                f"No cached snapshot for model '{model_name_or_path}' at "
+                f"revision '{revision}'. Disable local_files_only or download "
+                "the checkpoint explicitly."
+            ) from error
+        except RepositoryNotFoundError as error:
+            raise FileNotFoundError(
+                f"Model repository '{model_name_or_path}' was not found."
+            ) from error
+        except HfHubHTTPError as error:
+            raise RuntimeError(
+                f"Unable to resolve model '{model_name_or_path}' from the "
+                "Hugging Face Hub."
+            ) from error
+
+    @staticmethod
+    def _validate_relative_checkpoint_path(relative_path: str) -> Path:
+        path = Path(relative_path)
+        if path.is_absolute() or ".." in path.parts:
+            raise ValueError(
+                f"Invalid safetensors shard path in checkpoint index: "
+                f"'{relative_path}'"
+            )
+        return path
+
+    @classmethod
+    def _discover_safetensor_files(cls, checkpoint_path: Path) -> List[Path]:
+        index_files = sorted(checkpoint_path.rglob("*.safetensors.index.json"))
+        if len(index_files) > 1:
+            raise ValueError(
+                f"Multiple safetensors index files found in '{checkpoint_path}'."
+            )
+
+        if index_files:
+            try:
+                index_data = json.loads(index_files[0].read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError(
+                    f"Unable to read safetensors index '{index_files[0]}'."
+                ) from error
+
+            weight_map = index_data.get("weight_map")
+            if not isinstance(weight_map, dict) or not weight_map:
+                raise ValueError(
+                    f"Safetensors index '{index_files[0]}' has no weight_map."
+                )
+
+            relative_files = sorted(
+                {
+                    cls._validate_relative_checkpoint_path(file_name)
+                    for file_name in weight_map.values()
+                    if isinstance(file_name, str)
+                },
+                key=str,
+            )
+            if not relative_files:
+                raise ValueError(
+                    f"Safetensors index '{index_files[0]}' has no valid shards."
+                )
+
+            shard_files = [checkpoint_path / file for file in relative_files]
+            missing_shards = [file for file in shard_files if not file.is_file()]
+            if missing_shards:
+                missing = ", ".join(str(file) for file in missing_shards)
+                raise FileNotFoundError(
+                    f"Safetensors index references missing shard(s): {missing}"
+                )
+            return shard_files
+
+        safe_tensor_files = sorted(checkpoint_path.rglob("*.safetensors"))
+        if safe_tensor_files:
+            return safe_tensor_files
+
+        if any(checkpoint_path.rglob("*.bin")):
+            raise ValueError(
+                f"Checkpoint '{checkpoint_path}' contains PyTorch .bin weights, "
+                "but mlx-transformers supports safetensors only."
+            )
+        raise ValueError(f"No .safetensors files found at '{checkpoint_path}'")
+
+    @staticmethod
+    def _format_keys(keys: Set[str], limit: int = 10) -> str:
+        sorted_keys = sorted(keys)
+        result = ", ".join(sorted_keys[:limit])
+        if len(sorted_keys) > limit:
+            result += f", ... ({len(sorted_keys) - limit} more)"
+        return result
 
     @staticmethod
     def _load_checkpoint_config(download_path: Path) -> Dict[str, Any]:
@@ -90,7 +409,7 @@ class MlxPretrainedMixin:
 
     def _apply_pretrained_tensors(self, tensors: Dict[str, Any]) -> None:
         if hasattr(self, "load_weights"):
-            self.load_weights(list(tensors.items()), strict=False)
+            self.load_weights(list(tensors.items()), strict=True)
         else:
             self.update(tree_unflatten(list(tensors.items())))
 
@@ -103,6 +422,9 @@ class MlxPretrainedMixin:
         trust_remote_code: bool = False,
         max_workers: int = 4,
         *,
+        local_files_only: bool = False,
+        token: Optional[str] = None,
+        dtype: Optional[Any] = None,
         quantize: bool = False,
         group_size: Optional[int] = None,
         bits: Optional[int] = None,
@@ -120,6 +442,9 @@ class MlxPretrainedMixin:
             float16: Whether to convert model to float16
             trust_remote_code: Whether to trust remote code when loading
             max_workers: Number of worker threads for tensor conversion
+            local_files_only: Resolve Hub model IDs from the local cache only
+            token: Explicit Hugging Face token for a gated/private repository
+            dtype: Explicit MLX floating-point dtype for loaded tensors
             quantize: Whether to quantize the model after loading weights
             group_size: Quantization group size passed to ``mlx.nn.quantize``
             bits: Number of bits per quantized parameter
@@ -130,6 +455,24 @@ class MlxPretrainedMixin:
         Returns:
             Self with loaded model weights
         """
+        if trust_remote_code:
+            warnings.warn(
+                "trust_remote_code has no effect in mlx-transformers; the "
+                "loader never executes code from a model repository.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if float16 and dtype is not None:
+            raise ValueError("Pass only one of float16=True or dtype=....")
+        if dtype is not None and dtype not in {
+            mx.float16,
+            mx.bfloat16,
+            mx.float32,
+        }:
+            raise ValueError(
+                "dtype must be one of mx.float16, mx.bfloat16, or mx.float32."
+            )
+
         should_quantize = (
             quantize
             or group_size is not None
@@ -149,48 +492,36 @@ class MlxPretrainedMixin:
             f"(revision={revision}, float16={float16}, quantize={should_quantize})"
         )
 
-        local_path = Path(model_name_or_path)
-        if local_path.is_dir():
-            download_path = local_path
-            safe_tensor_files = [f.name for f in local_path.glob("*.safetensors")]
-        else:
-            fs = HfFileSystem()
-            remote_files = fs.glob(
-                f"{model_name_or_path}/*.safetensors",
-                revision=revision,
-            )
-            safe_tensor_files = [f.split("/")[-1] for f in remote_files]
-
-            if not safe_tensor_files:
-                raise ValueError(
-                    f"No .safetensors files found for model '{model_name_or_path}'"
-                )
-
-            download_path = Path(
-                snapshot_download(
-                    repo_id=model_name_or_path,
-                    allow_patterns=["*.safetensors", "config.json"],
-                    cache_dir=cache_dir,
-                    max_workers=max_workers,
-                    revision=revision,
-                    token=HF_TOKEN,
-                )
-            )
-
-        if not safe_tensor_files:
-            raise ValueError(f"No .safetensors files found at '{model_name_or_path}'")
+        download_path = self._resolve_checkpoint_path(
+            model_name_or_path,
+            cache_dir=cache_dir,
+            revision=revision,
+            local_files_only=local_files_only,
+            token=token,
+            max_workers=max_workers,
+        )
+        safe_tensor_files = self._discover_safetensor_files(download_path)
 
         checkpoint_config = self._load_checkpoint_config(download_path)
         checkpoint_quantization = self._get_checkpoint_quantization(
             checkpoint_config, self.config
         )
-        dtype = mx.float16 if float16 else mx.float32
+        load_dtype = (
+            dtype if dtype is not None else (mx.float16 if float16 else mx.float32)
+        )
 
         tensors = {}
         for file in safe_tensor_files:
-            file_path = download_path / file
-            tensors.update(mx.load(str(file_path)))
+            shard_tensors = mx.load(str(file))
+            duplicate_keys = set(tensors).intersection(shard_tensors)
+            if duplicate_keys:
+                raise ValueError(
+                    "Duplicate tensor key(s) found across safetensors shards: "
+                    f"{self._format_keys(duplicate_keys)}"
+                )
+            tensors.update(shard_tensors)
 
+        tensors = self._normalize_pretrained_tensors(tensors)
         prequantized_checkpoint = self._is_prequantized_checkpoint(
             tensors, checkpoint_quantization
         )
@@ -208,19 +539,36 @@ class MlxPretrainedMixin:
                 set(tensors),
             )
         else:
-            tensors = {k: v.astype(dtype) for k, v in tensors.items()}
+            tensors = {k: v.astype(load_dtype) for k, v in tensors.items()}
 
-        model_param_keys = set(param[0] for param in tree_flatten(self.parameters()))
-        ignored_tensor_keys = sorted(set(tensors) - model_param_keys)
+        model_params = dict(tree_flatten(self.parameters()))
+        model_param_keys = set(model_params)
+        unexpected_tensor_keys = set(tensors) - model_param_keys
+        ignored_tensor_keys = {
+            key
+            for key in unexpected_tensor_keys
+            if key.endswith(self._IGNORED_CHECKPOINT_SUFFIXES)
+        }
         if ignored_tensor_keys:
             logger.info(
                 "Ignoring %d pretrained tensors that do not map to MLX parameters: %s",
                 len(ignored_tensor_keys),
-                ", ".join(ignored_tensor_keys),
+                self._format_keys(ignored_tensor_keys),
             )
-            tensors = {k: v for k, v in tensors.items() if k in model_param_keys}
+            tensors = {
+                key: value
+                for key, value in tensors.items()
+                if key not in ignored_tensor_keys
+            }
 
-        if self.config.tie_word_embeddings:
+        unsupported_tensor_keys = unexpected_tensor_keys - ignored_tensor_keys
+        if unsupported_tensor_keys:
+            raise ValueError(
+                "Checkpoint contains tensor key(s) that do not map to this "
+                f"model: {self._format_keys(unsupported_tensor_keys)}"
+            )
+
+        if getattr(self.config, "tie_word_embeddings", False):
             missing_keys = model_param_keys - set(tensors.keys())
 
             # Architecture-specific tied-embedding resolution.
@@ -255,6 +603,27 @@ class MlxPretrainedMixin:
                 ):
                     if candidate in missing_keys:
                         tensors[candidate] = tensors["lm_head.weight"]
+
+        missing_keys = model_param_keys - set(tensors)
+        derived_parameter_keys = {
+            key
+            for key in missing_keys
+            if key.endswith(self._DERIVED_MODEL_PARAMETER_SUFFIXES)
+        }
+        if derived_parameter_keys:
+            logger.info(
+                "Keeping %d deterministic model parameters derived from config: %s",
+                len(derived_parameter_keys),
+                self._format_keys(derived_parameter_keys),
+            )
+            tensors.update({key: model_params[key] for key in derived_parameter_keys})
+
+        missing_keys = model_param_keys - set(tensors)
+        if missing_keys:
+            raise ValueError(
+                "Checkpoint is missing required model tensor key(s): "
+                f"{self._format_keys(missing_keys)}"
+            )
 
         self._apply_pretrained_tensors(tensors)
         if should_quantize and not prequantized_checkpoint:

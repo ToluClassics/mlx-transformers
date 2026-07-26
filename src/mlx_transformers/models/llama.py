@@ -13,7 +13,7 @@ from .modelling_outputs import (
     CausalLMOutputWithPast,
 )
 from .modeling_rope_utils import ROPE_INIT_FUNCTIONS
-from .utils import ACT2FN
+from .utils import ACT2FN, get_finite_min
 
 
 class LlamaRMSNorm(nn.Module):
@@ -557,7 +557,7 @@ class LlamaModel(nn.Module):
         past_seen_tokens: int,
     ):
         dtype = input_tensor.dtype
-        min_dtype = np.finfo(np.float32).min
+        min_dtype = get_finite_min(dtype)
         sequence_length = input_tensor.shape[1]
         if hasattr(
             getattr(self.layers[0], "self_attn", {}), "past_key_value"
@@ -834,47 +834,17 @@ class LlamaForCausalLM(nn.Module, MlxPretrainedMixin):
         )
         return model_inputs
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            else:
-                return mx.random.categorical(logits * (1 / temp))
-
-        # Process the prompt
-        use_cache = kwargs.get("use_cache", True)
-        output = self(**inputs, use_cache=use_cache)
-
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-        generated_tokens = 1
-
-        while generated_tokens < max_length:
-            # Update the prompt
-            next_token = mx.expand_dims(next_token, axis=0)
-
-            inputs["input_ids"] = next_token
-            inputs["attention_mask"] = mx.concatenate(
-                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)], axis=-1
-            )
-
-            past_key_values = output.past_key_values
-            inputs = self.prepare_inputs_for_generation(
-                input_ids=inputs["input_ids"],
-                past_key_values=past_key_values,
-                attention_mask=inputs["attention_mask"],
-                inputs_embeds=None,
-            )
-
-            output = self(**inputs)
-
-            next_token_logits = output.logits[:, -1, :]
-
-            next_token = sample(next_token_logits)
-
-            yield next_token
-            generated_tokens += 1
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            **kwargs,
+        )

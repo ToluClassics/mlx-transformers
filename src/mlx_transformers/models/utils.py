@@ -53,6 +53,11 @@ ACT2FN = {
 }
 
 
+def get_finite_min(dtype):
+    """Return the smallest finite value representable by an MLX float dtype."""
+    return mx.finfo(dtype).min
+
+
 def get_extended_attention_mask(
     attention_mask: mx.array, input_shape: Tuple[int], dtype=None
 ):
@@ -62,7 +67,7 @@ def get_extended_attention_mask(
     """
 
     if dtype is None:
-        dtype = attention_mask.dtype
+        dtype = mx.float32
 
     if attention_mask.ndim == 3:
         extended_attention_mask = attention_mask[:, None, :, :]
@@ -84,7 +89,7 @@ def get_extended_attention_mask(
         dtype=dtype
     )  # fp16 compatibility
 
-    extended_attention_mask = (1.0 - extended_attention_mask) * np.finfo(np.float32).min
+    extended_attention_mask = (1.0 - extended_attention_mask) * get_finite_min(dtype)
     return extended_attention_mask.astype(dtype=dtype)
 
 

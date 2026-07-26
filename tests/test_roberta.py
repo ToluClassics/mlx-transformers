@@ -1,4 +1,3 @@
-import os
 import unittest
 
 import mlx.core as mx
@@ -6,11 +5,6 @@ import numpy as np
 from transformers import (
     AutoTokenizer,
     RobertaConfig,
-    RobertaForQuestionAnswering,
-    RobertaForSequenceClassification,
-    RobertaForTokenClassification,
-    RobertaModel,
-    RobertaTokenizer,
 )
 
 from src.mlx_transformers.models import (
@@ -22,7 +16,7 @@ from src.mlx_transformers.models import (
 from src.mlx_transformers.models import (
     RobertaForTokenClassification as MlxRobertaForTokenClassification,
 )
-from src.mlx_transformers.models import RobertaModel as MlxRobertaModel
+from tests.utils import requires_hub
 
 
 def load_hgf_model(model_name: str, hgf_model_class):
@@ -30,9 +24,12 @@ def load_hgf_model(model_name: str, hgf_model_class):
     return model
 
 
+@requires_hub
 class TestMlxRobertaForSequenceClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import RobertaForSequenceClassification
+
         cls.model_name = "cardiffnlp/twitter-roberta-base-emotion"
         cls.hgf_model_class = RobertaForSequenceClassification
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
@@ -75,9 +72,12 @@ class TestMlxRobertaForSequenceClassification(unittest.TestCase):
         self.assertEqual(mlx_label, hgf_label)
 
 
+@requires_hub
 class TestMlxRobertaForTokenClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import RobertaForTokenClassification
+
         cls.model_name = "Jean-Baptiste/roberta-large-ner-english"
         cls.hgf_model_class = RobertaForTokenClassification
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
@@ -138,9 +138,12 @@ class TestMlxRobertaForTokenClassification(unittest.TestCase):
         self.assertEqual(mlx_predicted_tokens_classes, hgf_predicted_tokens_classes)
 
 
+@requires_hub
 class TestMlxRobertaForQuestionAnswering(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import RobertaForQuestionAnswering
+
         cls.model_name = "deepset/roberta-base-squad2"
         cls.hgf_model_class = RobertaForQuestionAnswering
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)

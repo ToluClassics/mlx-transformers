@@ -306,7 +306,7 @@ def benchmark_once(
     generated_tokens = 0
     start = time.time()
 
-    for token in model.generate(inputs, max_length=args.max_tokens, temp=args.temp):
+    for token in model.generate(inputs, max_new_tokens=args.max_tokens, temp=args.temp):
         mx.eval(token)
         token_id = int(token.item())
         now = time.time()

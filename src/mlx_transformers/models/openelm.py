@@ -10,7 +10,7 @@ from transformers import AutoConfig
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
 from .modelling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from .utils import ACT2FN
+from .utils import ACT2FN, get_finite_min
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +371,7 @@ class OpenELMModel(nn.Module):
         super().__init__()
         self.config = config
 
-        self.token_embeddings = nn.Embedding(config.model_dim, config.vocab_size)
+        self.token_embeddings = nn.Embedding(config.vocab_size, config.model_dim)
 
         self.layers = [
             OpenELMDecoderLayer(config, layer_idx)
@@ -538,7 +538,7 @@ class OpenELMModel(nn.Module):
             )
             self.causal_mask = mx.triu(causal_mask, 1)
 
-        min_dtype = np.finfo(np.float32).min
+        min_dtype = get_finite_min(dtype)
 
         causal_mask = self.causal_mask[None, None, :, :]
         causal_mask = (
@@ -757,46 +757,17 @@ class OpenELMForCausalLM(nn.Module, MlxPretrainedMixin):
 
         return model_inputs
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            else:
-                return mx.random.categorical(logits * (1 / temp))
-
-        # Process the prompt
-        inputs = self.prepare_inputs_for_generation(
-            input_ids=inputs["input_ids"],
-            past_key_values=None,
-            attention_mask=inputs["attention_mask"],
-            inputs_embeds=None,
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            **kwargs,
         )
-        output = self(**inputs)
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-
-        while True:
-            next_token = mx.expand_dims(next_token, axis=0)
-
-            inputs["input_ids"] = next_token
-            inputs["attention_mask"] = mx.concatenate(
-                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)], axis=-1
-            )
-
-            past_key_values = output.past_key_values
-            inputs = self.prepare_inputs_for_generation(
-                input_ids=inputs["input_ids"],
-                past_key_values=past_key_values,
-                attention_mask=inputs["attention_mask"],
-                inputs_embeds=None,
-            )
-
-            output = self(**inputs)
-
-            next_token_logits = output.logits[:, -1, :]
-            next_token = sample(next_token_logits)
-            yield next_token

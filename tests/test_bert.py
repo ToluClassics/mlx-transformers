@@ -8,10 +8,6 @@ from transformers import (
     AutoConfig,
     AutoTokenizer,
     BertConfig,
-    BertModel,
-    BertForQuestionAnswering,
-    BertForSequenceClassification,
-    BertForTokenClassification,
     BertTokenizer,
 )
 
@@ -29,6 +25,7 @@ from src.mlx_transformers.models import (
     BertForTokenClassification as MlxBertForTokenClassification,
 )
 from src.mlx_transformers.models.bert import BertEmbeddings, BertSelfOutput
+from tests.utils import requires_hub
 
 
 def load_hgf_model(model_name: str, hgf_model_class):
@@ -56,9 +53,12 @@ def load_tokenizer(tokenizer_class, model_name: str):
             transformers_logging.set_verbosity(previous_verbosity)
 
 
+@requires_hub
 class TestMlxBert(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import BertModel
+
         cls.model_name = "sentence-transformers/all-MiniLM-L6-v2"
         cls.config = BertConfig.from_pretrained(cls.model_name)
         cls.tokenizer = load_tokenizer(BertTokenizer, cls.model_name)
@@ -88,9 +88,12 @@ class TestMlxBert(unittest.TestCase):
         self.assertTrue(np.allclose(outputs_mlx, outputs_hgf, atol=1e-4))
 
 
+@requires_hub
 class TestMlxBertForSequenceClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import BertForSequenceClassification
+
         cls.model_name = "textattack/bert-base-uncased-yelp-polarity"
         cls.config = AutoConfig.from_pretrained(cls.model_name)
         cls.tokenizer = load_tokenizer(AutoTokenizer, cls.model_name)
@@ -136,9 +139,12 @@ class TestMlxBertForSequenceClassification(unittest.TestCase):
         self.assertEqual(mlx_label, hgf_label)
 
 
+@requires_hub
 class TestMlxBertForTokenClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import BertForTokenClassification
+
         cls.model_name = "dslim/bert-base-NER"
         cls.config = AutoConfig.from_pretrained(cls.model_name)
         cls.tokenizer = load_tokenizer(AutoTokenizer, cls.model_name)
@@ -203,9 +209,12 @@ class TestMlxBertForTokenClassification(unittest.TestCase):
         )
 
 
+@requires_hub
 class TestMlxBertForQuestionAnswering(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import BertForQuestionAnswering
+
         cls.model_name = "deepset/bert-base-cased-squad2"
         cls.tokenizer = load_tokenizer(AutoTokenizer, cls.model_name)
         cls.config = AutoConfig.from_pretrained(cls.model_name)

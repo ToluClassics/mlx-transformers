@@ -8,7 +8,7 @@ import numpy as np
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
 from .modelling_outputs import BaseModelOutputWithPast
-from .utils import ACT2FN
+from .utils import ACT2FN, get_finite_min
 
 
 def rotate_half(x):
@@ -502,7 +502,7 @@ def _make_causal_mask(
     token_type_ids=None,
 ):
     dtype = input_tensor.dtype
-    min_dtype = np.finfo(np.float32).min
+    min_dtype = get_finite_min(dtype)
     sequence_length = input_tensor.shape[1]
     target_length = (
         attention_mask.shape[-1]
@@ -550,10 +550,10 @@ def _make_causal_mask(
                 : mask_shape[3],
             ] = mask_slice
 
-    causal_mask = mx.array(causal_mask).astype(dtype)
+    causal_mask = mx.array(causal_mask)
     if token_type_ids is not None and past_seen_tokens == 0:
         causal_mask = _apply_image_bidirectional_overlay(causal_mask, token_type_ids)
-    return causal_mask
+    return causal_mask.astype(dtype)
 
 
 def create_causal_mask_mapping(
@@ -833,47 +833,20 @@ class Gemma3ForCausalLM(nn.Module, MlxPretrainedMixin):
             "attention_mask": attention_mask,
         }
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
-        use_cache = kwargs.get("use_cache", True)
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            return mx.random.categorical(logits * (1 / temp))
-
-        model_inputs = self.prepare_inputs_for_generation(
-            **inputs,
-            use_cache=use_cache,
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            **kwargs,
         )
-        output = self(**model_inputs)
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-        generated_tokens = 1
-
-        while generated_tokens < max_length:
-            next_token = mx.expand_dims(next_token, axis=0)
-            inputs["input_ids"] = next_token
-            inputs["attention_mask"] = mx.concatenate(
-                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)],
-                axis=-1,
-            )
-
-            model_inputs = self.prepare_inputs_for_generation(
-                input_ids=inputs["input_ids"],
-                past_key_values=output.past_key_values,
-                inputs_embeds=None,
-                position_ids=None,
-                attention_mask=inputs["attention_mask"],
-                use_cache=use_cache,
-            )
-            output = self(**model_inputs)
-            next_token_logits = output.logits[:, -1, :]
-            next_token = sample(next_token_logits)
-            yield next_token
-            generated_tokens += 1
 
 
 class Gemma3MultiModalProjector(nn.Module):
@@ -894,27 +867,25 @@ class Gemma3MultiModalProjector(nn.Module):
 
     def __call__(self, vision_outputs):
         batch_size, _, hidden_size = vision_outputs.shape
-        vision_np = np.array(vision_outputs)
-        vision_np = vision_np.transpose(0, 2, 1).reshape(
+        vision_grid = vision_outputs.transpose(0, 2, 1).reshape(
             batch_size,
             hidden_size,
             self.patches_per_image,
             self.patches_per_image,
         )
-
-        pooled = []
-        for batch_idx in range(batch_size):
-            sample = vision_np[batch_idx]
-            sample = sample.reshape(
-                hidden_size,
-                self.tokens_per_side,
-                self.kernel_size,
-                self.tokens_per_side,
-                self.kernel_size,
-            ).mean(axis=(2, 4))
-            pooled.append(sample.reshape(hidden_size, -1).transpose(1, 0))
-
-        pooled = mx.array(np.stack(pooled, axis=0))
+        pooled = vision_grid.reshape(
+            batch_size,
+            hidden_size,
+            self.tokens_per_side,
+            self.kernel_size,
+            self.tokens_per_side,
+            self.kernel_size,
+        ).mean(axis=(3, 5))
+        pooled = pooled.transpose(0, 2, 3, 1).reshape(
+            batch_size,
+            -1,
+            hidden_size,
+        )
         pooled = self.mm_soft_emb_norm(pooled)
         projected = pooled @ self.mm_input_projection_weight
         return projected.astype(vision_outputs.dtype)
@@ -1020,12 +991,14 @@ class Gemma3Model(nn.Module):
                 inputs_embeds=inputs_embeds,
                 image_features=image_features,
             )
-            inputs_embeds_np = np.array(inputs_embeds)
             image_mask_np = np.array(special_image_mask[..., 0]).astype(bool)
-            inputs_embeds_np[image_mask_np] = np.array(image_features).reshape(
-                -1, inputs_embeds_np.shape[-1]
-            )
-            inputs_embeds = mx.array(inputs_embeds_np)
+            inputs_embeds = mx.array(inputs_embeds)
+            for batch_idx in range(inputs_embeds.shape[0]):
+                image_positions = mx.array(
+                    np.nonzero(image_mask_np[batch_idx])[0],
+                    dtype=mx.int32,
+                )
+                inputs_embeds[batch_idx, image_positions] = image_features[batch_idx]
 
         causal_mask_mapping = attention_mask
         if not isinstance(causal_mask_mapping, dict):
@@ -1072,6 +1045,29 @@ class Gemma3ForConditionalGeneration(nn.Module, MlxPretrainedMixin):
             config.text_config.vocab_size,
             bias=False,
         )
+
+    def _normalize_pretrained_tensors(
+        self, tensors: Dict[str, mx.array]
+    ) -> Dict[str, mx.array]:
+        prefix_map = (
+            ("language_model.model.", "model.language_model."),
+            ("vision_tower.", "model.vision_tower."),
+            ("multi_modal_projector.", "model.multi_modal_projector."),
+        )
+        normalized = {}
+        for key, value in tensors.items():
+            normalized_key = key
+            for checkpoint_prefix, model_prefix in prefix_map:
+                if key.startswith(checkpoint_prefix):
+                    normalized_key = model_prefix + key[len(checkpoint_prefix) :]
+                    break
+            if normalized_key in normalized:
+                raise ValueError(
+                    "Checkpoint key normalization produced a duplicate tensor "
+                    f"key: {normalized_key}"
+                )
+            normalized[normalized_key] = value
+        return normalized
 
     def _apply_pretrained_tensors(self, tensors: Dict[str, mx.array]) -> None:
         tensors = dict(tensors)
@@ -1201,79 +1197,22 @@ class Gemma3ForConditionalGeneration(nn.Module, MlxPretrainedMixin):
             model_inputs["pixel_values"] = pixel_values
         return model_inputs
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
         has_multimodal_inputs = inputs.get("pixel_values") is not None
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            return mx.random.categorical(logits * (1 / temp))
-
-        use_cache = kwargs.get("use_cache", True) and not has_multimodal_inputs
-
-        if not use_cache:
-            generated_tokens = 0
-            while generated_tokens < max_length:
-                output = self(**inputs, use_cache=False)
-                next_token_logits = output.logits[:, -1, :]
-                next_token = sample(next_token_logits)
-                yield next_token
-                generated_tokens += 1
-
-                next_token = mx.expand_dims(next_token, axis=0)
-                inputs["input_ids"] = mx.concatenate(
-                    [mx.array(inputs["input_ids"]), next_token], axis=-1
-                )
-                inputs["attention_mask"] = mx.concatenate(
-                    [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)],
-                    axis=-1,
-                )
-                if inputs.get("token_type_ids") is not None:
-                    inputs["token_type_ids"] = mx.concatenate(
-                        [mx.array(inputs["token_type_ids"]), mx.zeros_like(next_token)],
-                        axis=-1,
-                    )
-            return
-
-        model_inputs = self.prepare_inputs_for_generation(
-            **inputs,
-            use_cache=use_cache,
-            is_first_iteration=True,
+        requested_cache = kwargs.pop("use_cache", True)
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            use_cache=requested_cache and not has_multimodal_inputs,
+            persistent_input_keys=("pixel_values",),
+            sequence_input_fill_values={"token_type_ids": 0},
+            **kwargs,
         )
-        output = self(**model_inputs)
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-        generated_tokens = 1
-
-        while generated_tokens < max_length:
-            next_token = mx.expand_dims(next_token, axis=0)
-            inputs["input_ids"] = next_token
-            inputs["attention_mask"] = mx.concatenate(
-                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)],
-                axis=-1,
-            )
-            if inputs.get("token_type_ids") is not None:
-                inputs["token_type_ids"] = mx.concatenate(
-                    [mx.array(inputs["token_type_ids"]), mx.zeros_like(next_token)],
-                    axis=-1,
-                )
-
-            model_inputs = self.prepare_inputs_for_generation(
-                input_ids=inputs["input_ids"],
-                past_key_values=output.past_key_values,
-                inputs_embeds=None,
-                position_ids=None,
-                pixel_values=inputs.get("pixel_values"),
-                attention_mask=inputs["attention_mask"],
-                token_type_ids=inputs.get("token_type_ids"),
-                use_cache=use_cache,
-                is_first_iteration=False,
-            )
-            output = self(**model_inputs)
-            next_token_logits = output.logits[:, -1, :]
-            next_token = sample(next_token_logits)
-            yield next_token
-            generated_tokens += 1
