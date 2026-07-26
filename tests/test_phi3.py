@@ -2,17 +2,21 @@ import unittest
 
 import mlx.core as mx
 import numpy as np
-from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM, Phi3Config
+from transformers import AutoTokenizer, AutoConfig, Phi3Config
 
 from src.mlx_transformers.models import Phi3Model as MlxPhi3Model
 from src.mlx_transformers.models import Phi3ForCausalLM as MlxPhi3ForCausalLM
+from tests.utils import requires_hub
 
 
-def load_hgf_model(model_name: str) -> AutoModelForCausalLM:
+def load_hgf_model(model_name: str):
+    from transformers import AutoModelForCausalLM
+
     model = AutoModelForCausalLM.from_pretrained(model_name)
     return model
 
 
+@requires_hub
 class TestMlxPhi3(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -54,11 +58,11 @@ class TestMlxPhi3LocalBehavior(unittest.TestCase):
             original_max_position_embeddings=32,
             rope_theta=10000.0,
             rope_scaling=rope_scaling,
+            partial_rotary_factor=partial_rotary_factor,
             embd_pdrop=0.0,
             resid_pdrop=0.0,
             attention_dropout=0.0,
         )
-        config.partial_rotary_factor = partial_rotary_factor
         config._attn_implementation = attn_implementation
         config.use_cache = True
         return config
@@ -121,10 +125,31 @@ class TestMlxPhi3LocalBehavior(unittest.TestCase):
                 {"input_ids": input_ids, "attention_mask": attention_mask},
                 max_length=3,
                 temp=0.0,
+                eos_token_id=[],
             )
         )
 
         self.assertEqual(len(tokens), 3)
+
+    def test_generate_supports_batches(self):
+        model = MlxPhi3ForCausalLM(self._tiny_config())
+        model.eval()
+        inputs = {
+            "input_ids": mx.array([[1, 2, 3], [0, 4, 5]], dtype=mx.int32),
+            "attention_mask": mx.array([[1, 1, 1], [0, 1, 1]], dtype=mx.int32),
+        }
+
+        tokens = list(
+            model.generate(
+                inputs,
+                max_new_tokens=2,
+                temp=0.0,
+                eos_token_id=[],
+            )
+        )
+
+        self.assertEqual(len(tokens), 2)
+        self.assertTrue(all(token.shape == (2,) for token in tokens))
 
     def test_longrope_supports_partial_rotary_factor(self):
         rope_scaling = {

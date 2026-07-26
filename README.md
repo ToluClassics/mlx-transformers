@@ -10,11 +10,28 @@ MLX implementations of Hugging Face-style models for Apple Silicon.
 pip install mlx-transformers
 ```
 
+Install only the optional features you use:
+
+```bash
+pip install "mlx-transformers[tokenizers]"
+pip install "mlx-transformers[vision]"
+pip install "mlx-transformers[chat]"
+```
+
 For local development:
 
 ```bash
-pip install -r requirements.txt
-pip install -e .
+python3.12 -m venv venv
+source venv/bin/activate
+python -m pip install --upgrade pip
+pip install -e ".[test,examples,chat]"
+```
+
+MLX requires Apple silicon and macOS. Verify that the environment can execute
+on Metal before running model tests:
+
+```bash
+python -c 'import mlx.core as mx; x = mx.array([1, 2, 3]); print(mx.sum(x).item())'
 ```
 
 ## Quick Start
@@ -51,21 +68,60 @@ model.from_pretrained(
 )
 ```
 
-## Supported Models
+Generation is finite and uses Hugging Face-style `max_new_tokens`:
 
-- BERT
-- RoBERTa
-- XLM-RoBERTa
-- LLaMA
-- Phi
-- Phi-3
-- Qwen3
-- Qwen3-VL
-- OpenELM
-- Persimmon
-- Fuyu
-- Gemma3
-- M2M100 / NLLB
+```python
+for token_ids in model.generate(
+    inputs["input_ids"],
+    attention_mask=inputs.get("attention_mask"),
+    max_new_tokens=64,
+    temp=0.0,
+):
+    print(token_ids)
+```
+
+The generator supports batched left- or right-padded prompts, per-sequence
+end-of-sequence handling, and cached or uncached decoding. The legacy
+`max_length` argument remains as a deprecated generated-token-count alias.
+
+For large multimodal Gemma 3 checkpoints, prefer `dtype=mx.bfloat16` on
+supported Apple silicon:
+
+```python
+model.from_pretrained(model_name, dtype=mx.bfloat16)
+```
+
+Offline or authenticated loading:
+
+```python
+# Resolve an already-cached Hub snapshot without network access.
+model.from_pretrained(model_name, local_files_only=True)
+
+# Local checkpoint directories are also supported.
+model.from_pretrained("/path/to/local/checkpoint")
+
+# Pass credentials explicitly for a reviewed gated/private repository.
+model.from_pretrained("org/private-model", token=token)
+```
+
+The loader supports safetensors checkpoints and shard indexes. It rejects
+missing required weights, duplicate shard keys, incompatible extra weights,
+and PyTorch `.bin`-only checkpoints instead of leaving model parameters
+silently initialized. `trust_remote_code` is not used: MLX Transformers never
+executes code from a model repository.
+
+## Model Support
+
+Real-checkpoint verification currently covers BERT, Llama, Phi-3, Qwen3,
+Gemma 3, and M2M100/NLLB paths. Phi, Qwen3-VL, RoBERTa, XLM-RoBERTa, OpenELM,
+Persimmon, and Fuyu remain experimental because at least one important
+real-checkpoint path is still unverified.
+
+See [SUPPORT.md](SUPPORT.md) for exact checkpoints/tasks, compatibility bounds,
+dtype limitations, generation semantics, and the verified/experimental
+promotion policy. OpenELM, Persimmon, and Fuyu are maintenance-only: existing
+behavior retains bounded regression coverage, but new compatibility and
+feature work prioritizes the active model families.
 
 ## Examples
 
@@ -116,8 +172,17 @@ python examples/text_generation/benchmark_generation.py --help
 
 ## Tests
 
+The default suite is bounded and does not download Hub models:
+
 ```bash
-python -m unittest
+HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  python -m unittest discover -s tests -v
 ```
 
-Some models are gated on Hugging Face. Set `HF_TOKEN` if needed.
+Tests that use external checkpoints are skipped unless
+`MLX_TRANSFORMERS_RUN_HUB_TESTS=1` is set. Review their model IDs and expected
+download sizes before opting in. Some checkpoints are gated; set `HF_TOKEN`
+only for an explicitly reviewed integration run.
+
+The verified 2026-07-26 Apple-silicon baseline is 98 discovered tests:
+76 pass and 22 Hub integration tests skip.

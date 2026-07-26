@@ -1,20 +1,24 @@
 import unittest
-import torch
 
 import mlx.core as mx
 import numpy as np
-from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM
+from transformers import AutoTokenizer, LlamaConfig
 
 from src.mlx_transformers.models.cache import DynamicCache
 from src.mlx_transformers.models import LlamaForCausalLM as MlxLlamaForCausalLM
 from src.mlx_transformers.models.llama import LlamaModel
+from tests.utils import requires_hub
 
 
-def load_hgf_model(model_name: str) -> LlamaForCausalLM:
+def load_hgf_model(model_name: str):
+    import torch
+    from transformers import LlamaForCausalLM
+
     model = LlamaForCausalLM.from_pretrained(model_name, dtype=torch.float32)
     return model
 
 
+@requires_hub
 class TestMlxLlama(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -165,7 +169,37 @@ class TestMlxLlamaLocalBehavior(unittest.TestCase):
                 {"input_ids": input_ids, "attention_mask": attention_mask},
                 max_length=3,
                 temp=0.0,
+                eos_token_id=[],
             )
         )
 
         self.assertEqual(len(tokens), 3)
+
+    def test_generate_supports_batches_without_mutating_inputs(self):
+        model = MlxLlamaForCausalLM(self._tiny_config())
+        model.eval()
+        input_ids = mx.array([[1, 2, 3, 4], [0, 0, 5, 6]], dtype=mx.int32)
+        attention_mask = mx.array([[1, 1, 1, 1], [0, 0, 1, 1]], dtype=mx.int32)
+        inputs = {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+        }
+
+        tokens = list(
+            model.generate(
+                inputs,
+                max_new_tokens=3,
+                temp=0.0,
+                eos_token_id=[],
+            )
+        )
+
+        self.assertEqual(len(tokens), 3)
+        self.assertTrue(all(token.shape == (2,) for token in tokens))
+        np.testing.assert_array_equal(
+            np.array(inputs["input_ids"]), np.array(input_ids)
+        )
+        np.testing.assert_array_equal(
+            np.array(inputs["attention_mask"]),
+            np.array(attention_mask),
+        )

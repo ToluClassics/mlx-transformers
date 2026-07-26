@@ -9,7 +9,7 @@ import numpy as np
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
 from .modelling_outputs import BaseModelOutputWithPast
-from .utils import ACT2FN
+from .utils import ACT2FN, get_finite_min
 
 
 def rotate_half(x):
@@ -604,7 +604,7 @@ class Qwen3VLTextModel(nn.Module):
 
     def _update_causal_mask(self, attention_mask, input_tensor, past_seen_tokens):
         dtype = input_tensor.dtype
-        min_dtype = np.finfo(np.float32).min
+        min_dtype = get_finite_min(dtype)
         sequence_length = input_tensor.shape[1]
         target_length = (
             attention_mask.shape[-1]
@@ -1341,86 +1341,30 @@ class Qwen3VLForConditionalGeneration(nn.Module, MlxPretrainedMixin):
         }
         return model_inputs
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
         has_multimodal_inputs = (
             inputs.get("pixel_values") is not None
             or inputs.get("pixel_values_videos") is not None
         )
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            return mx.random.categorical(logits * (1 / temp))
-
-        use_cache = kwargs.get("use_cache", True) and not has_multimodal_inputs
-
-        if not use_cache:
-            generated_tokens = 0
-            while generated_tokens < max_length:
-                output = self(**inputs, use_cache=False)
-                next_token_logits = output.logits[:, -1, :]
-                next_token = sample(next_token_logits)
-
-                yield next_token
-                generated_tokens += 1
-
-                next_token = mx.expand_dims(next_token, axis=0)
-                inputs["input_ids"] = mx.concatenate(
-                    [mx.array(inputs["input_ids"]), next_token], axis=-1
-                )
-                inputs["attention_mask"] = mx.concatenate(
-                    [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)],
-                    axis=-1,
-                )
-                if inputs.get("mm_token_type_ids") is not None:
-                    inputs["mm_token_type_ids"] = mx.concatenate(
-                        [
-                            mx.array(inputs["mm_token_type_ids"]),
-                            mx.zeros_like(next_token),
-                        ],
-                        axis=-1,
-                    )
-            return
-
-        model_inputs = self.prepare_inputs_for_generation(
-            **inputs,
-            use_cache=use_cache,
-            is_first_iteration=True,
+        requested_cache = kwargs.pop("use_cache", True)
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            use_cache=requested_cache and not has_multimodal_inputs,
+            persistent_input_keys=(
+                "pixel_values",
+                "pixel_values_videos",
+                "image_grid_thw",
+                "video_grid_thw",
+            ),
+            sequence_input_fill_values={"mm_token_type_ids": 0},
+            **kwargs,
         )
-        output = self(**model_inputs)
-
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-        generated_tokens = 1
-
-        while generated_tokens < max_length:
-            next_token = mx.expand_dims(next_token, axis=0)
-            inputs["input_ids"] = next_token
-            inputs["attention_mask"] = mx.concatenate(
-                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)],
-                axis=-1,
-            )
-
-            model_inputs = self.prepare_inputs_for_generation(
-                input_ids=inputs["input_ids"],
-                past_key_values=output.past_key_values,
-                attention_mask=inputs["attention_mask"],
-                inputs_embeds=None,
-                position_ids=None,
-                use_cache=use_cache,
-                pixel_values=inputs.get("pixel_values"),
-                pixel_values_videos=inputs.get("pixel_values_videos"),
-                image_grid_thw=inputs.get("image_grid_thw"),
-                video_grid_thw=inputs.get("video_grid_thw"),
-                mm_token_type_ids=inputs.get("mm_token_type_ids"),
-                is_first_iteration=False,
-            )
-            output = self(**model_inputs)
-
-            next_token_logits = output.logits[:, -1, :]
-            next_token = sample(next_token_logits)
-            yield next_token
-            generated_tokens += 1

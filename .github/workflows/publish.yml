@@ -1,30 +1,83 @@
-name: Release
+name: Publish
 
 on:
   release:
-    types: [created]
+    types: [published]
+
+permissions:
+  actions: read
+  contents: read
 
 jobs:
   pypi-publish:
     name: Publish release to PyPI
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/mlx-transformers
-    permissions:
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Check out the released revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: "3.x"
-      - name: Install dependencies
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - name: Find required CI artifact
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          python -m pip install --upgrade pip
-          pip install setuptools wheel
-      - name: Build package
+          release_sha="$(git rev-parse HEAD)"
+          run_id="$(
+            gh run list \
+              --workflow CI \
+              --branch main \
+              --commit "$release_sha" \
+              --status success \
+              --limit 20 \
+              --json databaseId,event \
+              --jq '[.[] | select(.event == "push")][0].databaseId'
+          )"
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "No successful main-branch CI run found for $release_sha" >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - name: Download distributions produced by CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download "${{ steps.ci.outputs.run_id }}" --name python-package --dir dist
+      - name: Verify release tag matches artifact version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          python setup.py sdist bdist_wheel  # Could also be python -m build
-      - name: Publish package distributions to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          python - <<'PY'
+          import glob
+          import os
+          import zipfile
+          from email.parser import Parser
+
+          wheels = glob.glob("dist/*.whl")
+          if len(wheels) != 1:
+              raise SystemExit(f"Expected one wheel, found: {wheels}")
+          with zipfile.ZipFile(wheels[0]) as archive:
+              metadata_path = next(
+                  name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+              )
+              metadata = Parser().parsestr(archive.read(metadata_path).decode())
+          artifact_version = metadata["Version"]
+          release_version = os.environ["RELEASE_TAG"].removeprefix("v")
+          if artifact_version != release_version:
+              raise SystemExit(
+                  f"Release tag {release_version!r} does not match "
+                  f"artifact version {artifact_version!r}"
+              )
+          PY
+      - name: Publish CI distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        with:
+          packages-dir: dist/

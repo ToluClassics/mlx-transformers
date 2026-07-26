@@ -100,7 +100,7 @@ def generate(
     prompt_processing = None
     tokens = []
     start = tic()
-    for token in model.generate(inputs, max_length=args.max_tokens, temp=args.temp):
+    for token in model.generate(inputs, max_new_tokens=args.max_tokens, temp=args.temp):
         mx.eval(token)
         token_id = int(token.item())
 

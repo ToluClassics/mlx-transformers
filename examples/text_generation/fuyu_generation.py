@@ -1,6 +1,5 @@
-import os
+import argparse
 import time
-import requests
 from typing import Tuple
 
 from PIL import Image
@@ -35,7 +34,6 @@ def load_model(
 
     """
     config = FuyuConfig.from_pretrained(model_name)
-    os.path.dirname(os.path.realpath(__file__))
 
     model = mlx_model_class(config)
     model.from_pretrained(model_name)
@@ -70,17 +68,18 @@ def generate(
     prompt_processing = None
     tokens = []
     start = tic()
-    for token in model.generate(converted_inputs, temp=0.0):
+    for token in model.generate(
+        converted_inputs,
+        max_new_tokens=max_tokens,
+        temp=temp,
+    ):
         tokens.append(token)
 
         if len(tokens) == 1:
             # Actually perform the computation to measure the prompt processing time
             prompt_processing = toc("Prompt processing", start)
 
-        if len(tokens) >= max_tokens:
-            break
-
-        elif (len(tokens) % write_every) == 0:
+        if (len(tokens) % write_every) == 0:
             # It is perfectly ok to eval things we have already eval-ed.
             s = processor.decode([t.item() for t in tokens])
             print(s[skip:], end="", flush=True)
@@ -95,11 +94,29 @@ def generate(
 
 
 if __name__ == "__main__":
-    url = "https://huggingface.co/datasets/hf-internal-testing/fixtures-captioning/resolve/main/bus.png"
-    image = Image.open(requests.get(url, stream=True).raw)
-    prompt = "Generate a coco-style caption.\n"
+    parser = argparse.ArgumentParser(
+        description="Generate text from an image with Fuyu."
+    )
+    parser.add_argument("--model_name", required=True)
+    parser.add_argument("--image_path", required=True)
+    parser.add_argument(
+        "--prompt",
+        default="Generate a concise caption for this image.\n",
+    )
+    parser.add_argument("--max_tokens", type=int, default=32)
+    parser.add_argument("--temp", type=float, default=0.0)
+    args = parser.parse_args()
+
+    image = Image.open(args.image_path).convert("RGB")
     mx.set_default_device(mx.gpu)
 
-    model, processor = load_model("adept/fuyu-8b", MlxFuyuForCausalLM)
+    model, processor = load_model(args.model_name, MlxFuyuForCausalLM)
 
-    generate(model, processor, prompt, image, temp=0.0)
+    generate(
+        model,
+        processor,
+        args.prompt,
+        image,
+        max_tokens=args.max_tokens,
+        temp=args.temp,
+    )

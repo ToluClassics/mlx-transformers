@@ -1,4 +1,3 @@
-import os
 import unittest
 
 import mlx.core as mx
@@ -6,9 +5,6 @@ import numpy as np
 from transformers import (
     AutoTokenizer,
     XLMRobertaConfig,
-    XLMRobertaForQuestionAnswering,
-    XLMRobertaForSequenceClassification,
-    XLMRobertaForTokenClassification,
 )
 
 from src.mlx_transformers.models import (
@@ -20,8 +16,7 @@ from src.mlx_transformers.models import (
 from src.mlx_transformers.models import (
     XLMRobertaForTokenClassification as MlxXLMRobertaForTokenClassification,
 )
-from src.mlx_transformers.models import XLMRobertaModel as MlxXLMRobertaModel
-from src.mlx_transformers.models.utils import convert
+from tests.utils import requires_hub
 
 
 def load_hgf_model(model_name: str, hgf_model_class):
@@ -29,9 +24,12 @@ def load_hgf_model(model_name: str, hgf_model_class):
     return model
 
 
+@requires_hub
 class TestMlxXLMRobertaForSequenceClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import XLMRobertaForSequenceClassification
+
         cls.model_name = "cardiffnlp/twitter-roberta-base-emotion"
         cls.hgf_model_class = XLMRobertaForSequenceClassification
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
@@ -75,9 +73,12 @@ class TestMlxXLMRobertaForSequenceClassification(unittest.TestCase):
         self.assertEqual(mlx_label, hgf_label)
 
 
+@requires_hub
 class TestMlxXLMRobertaForTokenClassification(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import XLMRobertaForTokenClassification
+
         cls.model_name = "Jean-Baptiste/roberta-large-ner-english"
         cls.hgf_model_class = XLMRobertaForTokenClassification
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)
@@ -139,9 +140,12 @@ class TestMlxXLMRobertaForTokenClassification(unittest.TestCase):
         self.assertEqual(mlx_predicted_tokens_classes, hgf_predicted_tokens_classes)
 
 
+@requires_hub
 class TestMlxXLMRobertaForQuestionAnswering(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        from transformers import XLMRobertaForQuestionAnswering
+
         cls.model_name = "deepset/roberta-base-squad2"
         cls.hgf_model_class = XLMRobertaForQuestionAnswering
         cls.tokenizer = AutoTokenizer.from_pretrained(cls.model_name)

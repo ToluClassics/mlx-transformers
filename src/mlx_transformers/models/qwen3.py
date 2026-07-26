@@ -8,7 +8,7 @@ from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
 from .llama import LlamaRotaryEmbedding, apply_rotary_pos_emb, repeat_kv
 from .modelling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from .utils import ACT2FN
+from .utils import ACT2FN, get_finite_min
 
 
 class Qwen3RMSNorm(nn.Module):
@@ -407,7 +407,7 @@ class Qwen3Model(nn.Module):
         past_seen_tokens: int,
     ):
         dtype = input_tensor.dtype
-        min_dtype = np.finfo(np.float32).min
+        min_dtype = get_finite_min(dtype)
         sequence_length = input_tensor.shape[1]
         target_length = (
             attention_mask.shape[-1]
@@ -643,41 +643,17 @@ class Qwen3ForCausalLM(nn.Module, MlxPretrainedMixin):
         )
         return model_inputs
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            return mx.random.categorical(logits * (1 / temp))
-
-        use_cache = kwargs.get("use_cache", True)
-        output = self(**inputs, use_cache=use_cache)
-
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-        generated_tokens = 1
-
-        while generated_tokens < max_length:
-            next_token = mx.expand_dims(next_token, axis=0)
-            inputs["input_ids"] = next_token
-            inputs["attention_mask"] = mx.concatenate(
-                [mx.array(inputs["attention_mask"]), mx.ones_like(next_token)], axis=-1
-            )
-
-            past_key_values = output.past_key_values
-            inputs = self.prepare_inputs_for_generation(
-                input_ids=inputs["input_ids"],
-                past_key_values=past_key_values,
-                attention_mask=inputs["attention_mask"],
-                inputs_embeds=None,
-            )
-            output = self(**inputs)
-
-            next_token_logits = output.logits[:, -1, :]
-            next_token = sample(next_token_logits)
-
-            yield next_token
-            generated_tokens += 1
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            **kwargs,
+        )

@@ -10,9 +10,19 @@ from transformers import AutoConfig
 from .base import MlxPretrainedMixin
 from .cache import Cache, DynamicCache
 from .modelling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from .utils import ACT2FN
+from .utils import ACT2FN, get_finite_min
 
 logger = logging.getLogger(__name__)
+
+
+def _get_rope_settings(config) -> dict:
+    rope_parameters = getattr(config, "rope_parameters", None)
+    if rope_parameters is not None:
+        return rope_parameters
+    rope_scaling = getattr(config, "rope_scaling", None)
+    if rope_scaling is not None:
+        return rope_scaling
+    return {}
 
 
 class PersimmonRotaryEmbedding(nn.Module):
@@ -126,8 +136,25 @@ class PersimmonAttention(nn.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = self.hidden_size // self.num_heads
         self.max_position_embeddings = config.max_position_embeddings
-        self.rope_theta = config.rope_theta
-        self.partial_rotary_factor = config.partial_rotary_factor
+        rope_settings = _get_rope_settings(config)
+        self.rope_theta = rope_settings.get(
+            "rope_theta", getattr(config, "rope_theta", 10000.0)
+        )
+        self.partial_rotary_factor = rope_settings.get(
+            "partial_rotary_factor",
+            getattr(config, "partial_rotary_factor", 0.5),
+        )
+        legacy_rope_scaling = getattr(config, "rope_scaling", None)
+        scaling_settings = legacy_rope_scaling or rope_settings
+        rope_type = scaling_settings.get(
+            "rope_type", scaling_settings.get("type", "default")
+        )
+        self.rope_scaling = None
+        if rope_type != "default":
+            self.rope_scaling = {
+                "type": rope_type,
+                "factor": scaling_settings["factor"],
+            }
         self.is_causal = True
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
@@ -164,15 +191,15 @@ class PersimmonAttention(nn.Module):
         self._init_rope()
 
     def _init_rope(self):
-        if self.config.rope_scaling is None:
+        if self.rope_scaling is None:
             self.rotary_emb = PersimmonRotaryEmbedding(
                 int(self.partial_rotary_factor * self.head_dim),
                 max_position_embeddings=self.max_position_embeddings,
                 base=self.rope_theta,
             )
         else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
+            scaling_type = self.rope_scaling["type"]
+            scaling_factor = self.rope_scaling["factor"]
             if scaling_type == "linear":
                 self.rotary_emb = PersimmonLinearScalingRotaryEmbedding(
                     int(self.partial_rotary_factor * self.head_dim),
@@ -427,12 +454,13 @@ class PersimmonModel(nn.Module):
             past_key_values_length = past_key_values.get_usable_length(seq_length)
             seq_length_with_past = seq_length_with_past + past_key_values_length
 
-        if position_ids is None:
-            position_ids = mx.arange(
+        if cache_position is None:
+            cache_position = mx.arange(
                 past_key_values_length,
                 seq_length + past_key_values_length,
             )
-            position_ids = mx.expand_dims(position_ids, 0)
+        if position_ids is None:
+            position_ids = mx.expand_dims(cache_position, 0)
 
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
@@ -440,7 +468,7 @@ class PersimmonModel(nn.Module):
         # TODO: implement cache
 
         causal_mask = self._update_causal_mask(
-            attention_mask, inputs_embeds, position_ids, past_key_values_length
+            attention_mask, inputs_embeds, cache_position, past_key_values_length
         )
 
         hidden_states = inputs_embeds
@@ -506,7 +534,7 @@ class PersimmonModel(nn.Module):
         past_seen_tokens: int,
     ):
         dtype = input_tensor.dtype
-        min_dtype = np.finfo(np.float32).min
+        min_dtype = get_finite_min(dtype)
         sequence_length = input_tensor.shape[1]
         if hasattr(
             getattr(self.layers[0], "self_attn", {}), "past_key_value"
@@ -729,38 +757,17 @@ class PersimmonForCausalLM(nn.Module, MlxPretrainedMixin):
         )
         return model_inputs
 
-    def generate(self, inputs: Dict, max_length: int, **kwargs):
-        temp = kwargs.get("temp", 1.0)
-
-        def sample(logits):
-            if temp == 0:
-                return mx.argmax(logits, axis=-1)
-            else:
-                return mx.random.categorical(logits * (1 / temp))
-
-        # Process the prompt
-        use_cache = kwargs.get("use_cache", True)
-        output = self(**inputs, use_cache=use_cache)
-
-        next_token_logits = output.logits[:, -1, :]
-        next_token = sample(next_token_logits)
-
-        yield next_token
-
-        while True:
-            # Update the prompt
-            next_token = mx.expand_dims(next_token, axis=0)
-            inputs["input_ids"] = mx.concatenate(
-                [inputs["input_ids"], next_token], axis=-1
-            )
-            inputs["attention_mask"] = mx.ones_like(inputs["input_ids"])
-
-            past_key_values = output.past_key_values
-            output = self(
-                **inputs, past_key_values=past_key_values, use_cache=use_cache
-            )
-
-            next_token_logits = output.logits[:, -1, :]
-            next_token = sample(next_token_logits)
-
-            yield next_token
+    def generate(
+        self,
+        inputs: Dict,
+        max_length: Optional[int] = None,
+        *,
+        max_new_tokens: Optional[int] = None,
+        **kwargs,
+    ):
+        return self._generate_tokens(
+            inputs,
+            max_new_tokens=max_new_tokens,
+            max_length=max_length,
+            **kwargs,
+        )

@@ -60,7 +60,7 @@ def generate(model: MlxOpenELMForCausalLM, tokenizer: AutoTokenizer, args):
     prompt_processing = None
     tokens = []
     start = tic()
-    for token in model.generate(inputs, max_length=args.max_tokens, temp=args.temp):
+    for token in model.generate(inputs, max_new_tokens=args.max_tokens, temp=args.temp):
         tokens.append(token)
 
         if len(tokens) == 1:

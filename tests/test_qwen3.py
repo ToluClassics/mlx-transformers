@@ -139,10 +139,31 @@ class TestMlxQwen3LocalBehavior(unittest.TestCase):
                 {"input_ids": input_ids, "attention_mask": attention_mask},
                 max_length=3,
                 temp=0.0,
+                eos_token_id=[],
             )
         )
 
         self.assertEqual(len(tokens), 3)
+
+    def test_generate_supports_batches(self):
+        model = MlxQwen3ForCausalLM(self._tiny_config())
+        model.eval()
+        inputs = {
+            "input_ids": mx.array([[1, 2, 3], [0, 4, 5]], dtype=mx.int32),
+            "attention_mask": mx.array([[1, 1, 1], [0, 1, 1]], dtype=mx.int32),
+        }
+
+        tokens = list(
+            model.generate(
+                inputs,
+                max_new_tokens=2,
+                temp=0.0,
+                eos_token_id=[],
+            )
+        )
+
+        self.assertEqual(len(tokens), 2)
+        self.assertTrue(all(token.shape == (2,) for token in tokens))
 
     def test_sliding_window_attention_is_not_implemented(self):
         with self.assertRaisesRegex(

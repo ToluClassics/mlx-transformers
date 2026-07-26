@@ -1,5 +1,4 @@
 import mlx.core as mx
-import numpy as np
 
 from transformers import AutoConfig, AutoTokenizer
 from mlx_transformers.models import BertModel as MLXBertModel

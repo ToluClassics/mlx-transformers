@@ -91,7 +91,7 @@ def generate(the_prompt, the_model):
     inputs = {key: mx.array(v) for key, v in inputs.items()}
 
     for token, n in zip(
-        the_model.generate(inputs, max_length=2048, temp=temperature),
+        the_model.generate(inputs, max_new_tokens=context_length, temp=temperature),
         range(context_length),
     ):
         if token == tokenizer.eos_token_id:
