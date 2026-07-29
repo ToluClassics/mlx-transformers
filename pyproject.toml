@@ -35,6 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
+mlx-transformers-benchmark = "mlx_transformers.benchmark:main"
 mlx-transformers-generate = "mlx_transformers.cli:main"
 
 [project.optional-dependencies]
@@ -74,3 +75,6 @@ Issues = "https://github.com/ToluClassics/mlx-transformers/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["mlx_transformers*"]
+
+[tool.setuptools.package-data]
+mlx_transformers = ["benchmark_data/*.json"]

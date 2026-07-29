@@ -269,7 +269,7 @@ def load_prompt_examples(tokenizer, args) -> List[PromptExample]:
 
 
 def load_model_and_tokenizer(model_name: str, args):
-    config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    config = AutoConfig.from_pretrained(model_name, trust_remote_code=False)
     model_class = resolve_model_class(config)
     model = model_class(config)
     model.from_pretrained(
@@ -283,7 +283,7 @@ def load_model_and_tokenizer(model_name: str, args):
     )
 
     tokenizer_name = resolve_tokenizer_name(model_name, config)
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=False)
     return model, tokenizer
 
 

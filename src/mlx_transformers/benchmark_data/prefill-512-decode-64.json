@@ -1,0 +1,12 @@
+{
+  "protocol_version": "1.0",
+  "id": "prefill-512-decode-64",
+  "description": "Measure a 512-token prefill followed by 64 greedy decode tokens.",
+  "prompt": "Summarize the design constraints of a private local language-model application, including correctness, reproducibility, memory use, latency, security, and clear evidence for every technical claim.",
+  "prompt_tokens": 512,
+  "max_new_tokens": 64,
+  "temperature": 0.0,
+  "seed": 0,
+  "warmup_runs": 1,
+  "measured_runs": 5
+}
