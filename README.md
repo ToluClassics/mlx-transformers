@@ -235,9 +235,9 @@ mlx-transformers-benchmark validate phi3-short.json
 The built-in protocol also includes `prefill-512-decode-64`. Every result
 records the immutable model revision, Apple hardware, software versions,
 quantization, individual measurements, summary statistics, and MLX peak
-memory without recording hostnames or local cache paths. See
-[benchmarks/PROTOCOL-v1.md](benchmarks/PROTOCOL-v1.md) for the exact protocol
-and reproducibility-log workflow.
+memory without recording hostnames or local cache paths. See the
+[reproducibility log](benchmarks/REPRODUCIBILITY_LOG.md) for validated
+reference results and their complete machine-readable records.
 
 ## Tests
 
