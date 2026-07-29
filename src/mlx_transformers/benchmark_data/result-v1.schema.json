@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ToluClassics/mlx-transformers/benchmarks/result-v1.schema.json",
+  "title": "MLX Transformers benchmark result v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "created_at",
+    "invocation",
+    "scenario",
+    "model",
+    "environment",
+    "runs",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "invocation": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "required": ["definition", "sha256"],
+      "properties": {
+        "definition": {
+          "type": "object"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "id",
+        "tokenizer_id",
+        "revision",
+        "dtype",
+        "local_files_only",
+        "quantization"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tokenizer_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "dtype": {
+          "enum": ["float16", "bfloat16", "float32"]
+        },
+        "local_files_only": {
+          "type": "boolean"
+        },
+        "quantization": {
+          "type": ["object", "null"]
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "required": ["hardware", "software", "model_active_memory_bytes"],
+      "properties": {
+        "hardware": {
+          "type": "object",
+          "required": [
+            "architecture",
+            "chip",
+            "machine_model",
+            "memory_bytes"
+          ]
+        },
+        "software": {
+          "type": "object",
+          "required": [
+            "macos",
+            "python",
+            "mlx",
+            "transformers",
+            "mlx_transformers",
+            "mlx_transformers_commit"
+          ],
+          "properties": {
+            "mlx_transformers_commit": {
+              "type": ["string", "null"],
+              "pattern": "^[0-9a-f]{40}$"
+            }
+          }
+        },
+        "model_active_memory_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "required": [
+          "generated_tokens",
+          "token_sha256",
+          "time_to_first_token_seconds",
+          "prefill_tokens_per_second",
+          "decode_tokens_per_second",
+          "total_seconds",
+          "peak_memory_bytes"
+        ],
+        "properties": {
+          "token_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object"
+    }
+  }
+}

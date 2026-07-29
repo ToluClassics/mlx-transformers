@@ -220,11 +220,24 @@ cd chat
 bash start.sh
 ```
 
-Benchmark:
+Reproducible benchmarks:
 
 ```bash
-python examples/text_generation/benchmark_generation.py --help
+mlx-transformers-benchmark run \
+  --scenario short-decode-128 \
+  --model mlx-community/Phi-3-mini-4k-instruct-4bit \
+  --revision 5b3819ed6317784fb20eddeae9bed984f778d0d0 \
+  --output phi3-short.json
+
+mlx-transformers-benchmark validate phi3-short.json
 ```
+
+The built-in protocol also includes `prefill-512-decode-64`. Every result
+records the immutable model revision, Apple hardware, software versions,
+quantization, individual measurements, summary statistics, and MLX peak
+memory without recording hostnames or local cache paths. See the
+[reproducibility log](benchmarks/REPRODUCIBILITY_LOG.md) for validated
+reference results.
 
 ## Tests
 
@@ -240,5 +253,5 @@ Tests that use external checkpoints are skipped unless
 download sizes before opting in. Some checkpoints are gated; set `HF_TOKEN`
 only for an explicitly reviewed integration run.
 
-The verified 2026-07-26 Apple-silicon baseline is 114 discovered tests:
-92 pass and 22 Hub integration tests skip.
+The verified Apple-silicon baseline is 119 discovered tests: 97 pass and 22
+Hub integration tests skip.

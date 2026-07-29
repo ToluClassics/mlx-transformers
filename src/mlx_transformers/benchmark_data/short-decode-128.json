@@ -1,0 +1,12 @@
+{
+  "protocol_version": "1.0",
+  "id": "short-decode-128",
+  "description": "Measure a 64-token prefill followed by 128 greedy decode tokens.",
+  "prompt": "Explain grouped-query attention and why it reduces inference memory.",
+  "prompt_tokens": 64,
+  "max_new_tokens": 128,
+  "temperature": 0.0,
+  "seed": 0,
+  "warmup_runs": 1,
+  "measured_runs": 5
+}
