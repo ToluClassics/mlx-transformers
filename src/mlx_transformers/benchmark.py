@@ -100,20 +100,32 @@ def validate_result(result: Dict[str, Any]) -> None:
         raise ValueError(f"Result is missing required keys: {', '.join(missing)}")
     if result["schema_version"] != SCHEMA_VERSION:
         raise ValueError("Only benchmark result schema_version '1.0' is supported.")
+    created_at = result["created_at"]
+    if isinstance(created_at, str) and created_at.endswith("Z"):
+        created_at = created_at[:-1] + "+00:00"
     try:
-        datetime.fromisoformat(result["created_at"])
+        datetime.fromisoformat(created_at)
     except (TypeError, ValueError) as error:
         raise ValueError("Result created_at must be an ISO 8601 timestamp.") from error
     invocation = result["invocation"]
-    if not invocation or not all(isinstance(value, str) for value in invocation):
+    if (
+        not isinstance(invocation, list)
+        or not invocation
+        or not all(isinstance(value, str) for value in invocation)
+    ):
         raise ValueError("Result invocation must be a non-empty string list.")
 
-    scenario = result["scenario"]["definition"]
+    scenario_record = result["scenario"]
+    if not isinstance(scenario_record, dict) or not isinstance(
+        scenario_record.get("definition"), dict
+    ):
+        raise ValueError("Result scenario.definition must be an object.")
+    scenario = scenario_record["definition"]
     validate_scenario(scenario)
     expected_hash = hashlib.sha256(
         json.dumps(scenario, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    if result["scenario"].get("sha256") != expected_hash:
+    if scenario_record.get("sha256") != expected_hash:
         raise ValueError("Scenario checksum does not match its embedded definition.")
 
     model = result["model"]
@@ -190,11 +202,13 @@ def build_fixed_inputs(tokenizer: Any, scenario: Dict[str, Any]) -> Dict[str, mx
         raise ValueError("The scenario prompt produced no tokens.")
 
     bos_token_id = getattr(tokenizer, "bos_token_id", None)
-    if bos_token_id is not None:
-        token_ids = [bos_token_id, *token_ids]
     target = scenario["prompt_tokens"]
-    repeated = (token_ids * ((target + len(token_ids) - 1) // len(token_ids)))[:target]
-    input_ids = mx.array([repeated], dtype=mx.int32)
+    prefix = [] if bos_token_id is None else [bos_token_id]
+    content_length = target - len(prefix)
+    repeated = (token_ids * ((content_length + len(token_ids) - 1) // len(token_ids)))[
+        :content_length
+    ]
+    input_ids = mx.array([[*prefix, *repeated]], dtype=mx.int32)
     return {
         "input_ids": input_ids,
         "attention_mask": mx.ones_like(input_ids),
@@ -216,7 +230,10 @@ def benchmark_once(
         eos_token_id=(),
     )
 
-    first_token = next(tokens)
+    try:
+        first_token = next(tokens)
+    except StopIteration as error:
+        raise RuntimeError(f"Expected {max_new_tokens} tokens, generated 0.") from error
     mx.eval(first_token)
     token_hash = hashlib.sha256()
     token_hash.update(int(first_token.item()).to_bytes(8, "little", signed=True))
@@ -240,6 +257,8 @@ def benchmark_once(
         "time_to_first_token_seconds": prefill_seconds,
         "prefill_tokens_per_second": (
             int(inputs["input_ids"].shape[-1]) / prefill_seconds
+            if prefill_seconds > 0
+            else 0.0
         ),
         "decode_tokens_per_second": (
             (generated_tokens - 1) / decode_seconds if decode_seconds > 0 else 0.0

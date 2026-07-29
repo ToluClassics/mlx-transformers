@@ -10,6 +10,8 @@ from unittest.mock import patch
 import mlx.core as mx
 
 from src.mlx_transformers.benchmark import (
+    benchmark_once,
+    build_fixed_inputs,
     main,
     read_json,
     render_log,
@@ -36,6 +38,12 @@ class FakeModel:
         self.settings = (max_new_tokens, temp, eos_token_id)
         for token_id in range(max_new_tokens):
             yield mx.array([token_id % 8])
+
+
+class EmptyModel:
+    def generate(self, inputs, *, max_new_tokens, temp, eos_token_id):
+        del inputs, max_new_tokens, temp, eos_token_id
+        return iter(())
 
 
 class TestBenchmarkProtocol(unittest.TestCase):
@@ -119,6 +127,26 @@ class TestBenchmarkProtocol(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "40-character"):
             validate_result(result)
 
+    def test_result_accepts_utc_z_timestamp(self):
+        result = self._valid_result()
+        result["created_at"] = "2026-07-28T00:00:00Z"
+
+        validate_result(result)
+
+    def test_result_requires_invocation_list(self):
+        result = self._valid_result()
+        result["invocation"] = "mlx-transformers-benchmark"
+
+        with self.assertRaisesRegex(ValueError, "string list"):
+            validate_result(result)
+
+    def test_result_requires_scenario_definition_object(self):
+        result = self._valid_result()
+        result["scenario"] = {}
+
+        with self.assertRaisesRegex(ValueError, "scenario.definition"):
+            validate_result(result)
+
     def test_result_rejects_private_paths(self):
         result = self._valid_result()
         result["environment"]["note"] = "/Users/example/private-cache"
@@ -132,6 +160,31 @@ class TestBenchmarkProtocol(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "checksums differ"):
             validate_result(result)
+
+    def test_fixed_inputs_include_bos_once(self):
+        scenario = read_json("short-decode-128")
+        scenario["prompt_tokens"] = 8
+
+        inputs = build_fixed_inputs(FakeTokenizer(), scenario)
+
+        self.assertEqual(inputs["input_ids"].tolist(), [[1, 4, 5, 6, 4, 5, 6, 4]])
+
+    def test_empty_generation_reports_required_token_count(self):
+        inputs = {"input_ids": mx.array([[1]], dtype=mx.int32)}
+
+        with self.assertRaisesRegex(RuntimeError, "generated 0"):
+            benchmark_once(EmptyModel(), inputs, max_new_tokens=2)
+
+    def test_zero_prefill_duration_reports_zero_rate(self):
+        inputs = {"input_ids": mx.array([[1]], dtype=mx.int32)}
+
+        with patch(
+            "src.mlx_transformers.benchmark.time.perf_counter",
+            side_effect=[1.0, 1.0, 2.0],
+        ):
+            result = benchmark_once(FakeModel(), inputs, max_new_tokens=2)
+
+        self.assertEqual(result["prefill_tokens_per_second"], 0.0)
 
     @staticmethod
     def _valid_result():
