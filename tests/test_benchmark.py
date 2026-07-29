@@ -110,7 +110,7 @@ class TestBenchmarkProtocol(unittest.TestCase):
             log = render_log([str(result_path)])
             self.assertIn("test-scenario", log)
             self.assertIn("org/model", log)
-            self.assertIn("reference-results/result.json", log)
+            self.assertNotIn("reference-results", log)
 
     def test_result_requires_immutable_revision(self):
         result = self._valid_result()

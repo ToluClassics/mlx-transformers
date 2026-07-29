@@ -389,7 +389,6 @@ def run_benchmark(args: argparse.Namespace) -> Dict[str, Any]:
 def render_log(paths: List[str]) -> str:
     rows = []
     for path_string in paths:
-        path = Path(path_string)
         result = read_json(path_string)
         validate_result(result)
         scenario = result["scenario"]["definition"]
@@ -418,23 +417,21 @@ def render_log(paths: List[str]) -> str:
                 summary["decode_tokens_per_second"]["median"],
                 summary["peak_memory_bytes"]["maximum"] / (1024**3),
                 len(result["runs"]),
-                path.name,
             )
         )
 
     lines = [
         "# MLX Transformers Reproducibility Log",
         "",
-        "Validated protocol v1 results. Each filename links to the complete "
-        "machine-readable record.",
+        "Validated protocol v1 results.",
         "",
         (
             "| Scenario | Chip | Memory | Model | Quantization | Prompt | "
-            "Decode | TTFT | Prefill | Decode rate | Peak | Runs | Result |"
+            "Decode | TTFT | Prefill | Decode rate | Peak | Runs |"
         ),
         (
             "| --- | --- | ---: | --- | --- | ---: | ---: | ---: | ---: | "
-            "---: | ---: | ---: | --- |"
+            "---: | ---: | ---: |"
         ),
     ]
     for row in sorted(rows):
@@ -443,7 +440,7 @@ def render_log(paths: List[str]) -> str:
             f"{row[0]} | {row[1]} | {row[2]} | {row[3]} | {row[4]} | "
             f"{row[5]} | {row[6]} | {row[7]:.1f} ms | "
             f"{row[8]:.1f} tok/s | {row[9]:.1f} tok/s | {row[10]:.2f} GiB | "
-            f"{row[11]} | [JSON](reference-results/{row[12]}) |"
+            f"{row[11]} |"
         )
     return "\n".join(lines) + "\n"
 

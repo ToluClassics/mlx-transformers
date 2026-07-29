@@ -237,7 +237,7 @@ records the immutable model revision, Apple hardware, software versions,
 quantization, individual measurements, summary statistics, and MLX peak
 memory without recording hostnames or local cache paths. See the
 [reproducibility log](benchmarks/REPRODUCIBILITY_LOG.md) for validated
-reference results and their complete machine-readable records.
+reference results.
 
 ## Tests
 
