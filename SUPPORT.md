@@ -58,10 +58,10 @@ upstream releases require compatibility evidence before those bounds move.
 | Family | Status | Evidence-backed scope |
 | --- | --- | --- |
 | BERT | Verified | Strict base/task-head loading and forward execution; MiniLM base-model parity at `1e-4` |
-| Llama | Verified | Strict loading, forward, finite batched cached generation, and real-checkpoint parity |
+| Llama | Verified | Pinned Llama 3.2 1B strict loading, forward parity, finite cached generation, runtime affine 4-bit generation, and protocol v1 benchmarks |
 | Phi | Experimental | Real Phi-2 strict load/forward; generation contract covered synthetically |
 | Phi-3 | Verified | Real strict load/forward plus real 4-bit MLX checkpoint cached generation |
-| Qwen3 | Verified | Real 0.6B strict load and batch-two generation parity with identical argmax |
+| Qwen3 | Verified | Pinned 0.6B strict loading, batch-two generation parity, runtime affine 4-bit generation, and protocol v1 benchmarks |
 | Gemma 3 | Verified | Real 1B text generation parity and real 4B image generation in float32/bfloat16 |
 | M2M100/NLLB | Verified | Real distilled 600M encoder, decoder, and logits path |
 | Qwen3-VL | Experimental | Real 2B text generation; image generation is synthetic-only |
@@ -88,6 +88,12 @@ public CLI was run offline against the cached Phi-3 checkpoint on Apple
 silicon. Affine, MXFP4, MXFP8, and NVFP4 settings are validated against the
 MLX 0.31/0.32 contract, but real-checkpoint evidence is currently limited to
 affine 4-bit weights.
+
+Runtime affine 4-bit/group-64 generation also passes through the public CLI
+for `meta-llama/Llama-3.2-1B` at revision
+`4e20de362430cd3b72f300e6b0f18e50e7166e08` and `Qwen/Qwen3-0.6B` at
+revision `c1899de289a04d12100db370d81485cdf75e47ca`. These checks use cached
+checkpoints with Hub and Transformers offline modes enabled.
 
 ## Generation contract
 
